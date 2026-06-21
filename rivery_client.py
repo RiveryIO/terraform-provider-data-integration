@@ -12,6 +12,7 @@ Credentials are resolved in order:
 
 No secret is ever printed.
 """
+
 from __future__ import annotations
 
 import os
@@ -28,8 +29,13 @@ DEFAULT_BACKOFF_S = 1.0
 # Stripped before every write — the API rejects these as extra_forbidden.
 # Lifted verbatim from BDI _RIVER_WRITE_FORBIDDEN_FIELDS.
 _WRITE_FORBIDDEN_FIELDS: tuple[str, ...] = (
-    "title", "id", "cross_id", "_id", "account_id",
-    "environment_name", "group_name",
+    "title",
+    "id",
+    "cross_id",
+    "_id",
+    "account_id",
+    "environment_name",
+    "group_name",
 )
 
 
@@ -54,7 +60,10 @@ class ValidationError(RiveryAPIError):
 
 
 _STATUS_TO_EXCEPTION: dict[int, type[RiveryAPIError]] = {
-    401: AuthError, 403: AuthError, 404: NotFoundError, 422: ValidationError,
+    401: AuthError,
+    403: AuthError,
+    404: NotFoundError,
+    422: ValidationError,
 }
 
 
@@ -88,8 +97,12 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
 def normalize_river(raw: dict[str, Any]) -> dict[str, Any]:
     """Add stable `id`/`title` aliases across list vs detail responses."""
     out = dict(raw)
-    out["id"] = (raw.get("id") or raw.get("river_cross_id")
-                 or raw.get("cross_id") or raw.get("_id"))
+    out["id"] = (
+        raw.get("id")
+        or raw.get("river_cross_id")
+        or raw.get("cross_id")
+        or raw.get("_id")
+    )
     out["title"] = raw.get("title") or raw.get("name")
     return out
 
@@ -112,20 +125,40 @@ class RiveryClient:
     ) -> None:
         env_file = os.environ.get("RIVERY_IAC_ENV_FILE")
         filevals = _read_env_file(Path(env_file)) if env_file else {}
-        self.token = (token or os.environ.get("DATA_INTEGRATION_API_TOKEN")
-                      or filevals.get("CLI_TOKEN"))
-        self.base_url = (base_url or os.environ.get("DATA_INTEGRATION_API_URL")
-                         or filevals.get("API_URL") or "").rstrip("/")
-        self.account_id = (account_id or os.environ.get("DATA_INTEGRATION_ACCOUNT_ID")
-                           or filevals.get("ACCOUNT_ID"))
-        self.env_id = (env_id or os.environ.get("DATA_INTEGRATION_ENVIRONMENT_ID")
-                       or filevals.get("ENVIRONMENT_ID"))
+        self.token = (
+            token
+            or os.environ.get("DATA_INTEGRATION_API_TOKEN")
+            or filevals.get("CLI_TOKEN")
+        )
+        self.base_url = (
+            base_url
+            or os.environ.get("DATA_INTEGRATION_API_URL")
+            or filevals.get("API_URL")
+            or ""
+        ).rstrip("/")
+        self.account_id = (
+            account_id
+            or os.environ.get("DATA_INTEGRATION_ACCOUNT_ID")
+            or filevals.get("ACCOUNT_ID")
+        )
+        self.env_id = (
+            env_id
+            or os.environ.get("DATA_INTEGRATION_ENVIRONMENT_ID")
+            or filevals.get("ENVIRONMENT_ID")
+        )
         self.max_retries = max_retries
         self.backoff_s = backoff_s
         self.timeout = timeout
-        missing = [n for n, v in (("token", self.token), ("base_url", self.base_url),
-                                  ("account_id", self.account_id), ("env_id", self.env_id))
-                   if not v]
+        missing = [
+            n
+            for n, v in (
+                ("token", self.token),
+                ("base_url", self.base_url),
+                ("account_id", self.account_id),
+                ("env_id", self.env_id),
+            )
+            if not v
+        ]
         if missing:
             raise ValueError(f"Missing credentials: {', '.join(missing)}")
 
@@ -140,18 +173,31 @@ class RiveryClient:
         }
 
     def _scoped(self, endpoint: str) -> str:
-        return (f"{self.base_url}/v1/accounts/{self.account_id}"
-                f"/environments/{self.env_id}{endpoint}")
+        return (
+            f"{self.base_url}/v1/accounts/{self.account_id}"
+            f"/environments/{self.env_id}{endpoint}"
+        )
 
-    def _request(self, method: str, endpoint: str, *,
-                 data: dict[str, Any] | None = None,
-                 params: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
         url = self._scoped(endpoint)
         attempt = 0
         while True:
             try:
-                r = requests.request(method, url, headers=self.headers,
-                                     json=data, params=params, timeout=self.timeout)
+                r = requests.request(
+                    method,
+                    url,
+                    headers=self.headers,
+                    json=data,
+                    params=params,
+                    timeout=self.timeout,
+                )
             except requests.RequestException as e:
                 attempt += 1
                 if attempt > self.max_retries:
@@ -163,7 +209,9 @@ class RiveryClient:
             if r.status_code >= 500:
                 attempt += 1
                 if attempt > self.max_retries:
-                    raise RiveryAPIError(r.status_code, f"5xx after retries: {r.text[:200]}")
+                    raise RiveryAPIError(
+                        r.status_code, f"5xx after retries: {r.text[:200]}"
+                    )
                 time.sleep(self.backoff_s * attempt)
                 continue
             details: Any = r.text
@@ -188,7 +236,9 @@ class RiveryClient:
         return normalize_river(self._request("GET", f"/rivers/{cross_id}"))
 
     def create_river(self, config: dict[str, Any]) -> dict[str, Any]:
-        return normalize_river(self._request("POST", "/rivers", data=_strip_forbidden(config)))
+        return normalize_river(
+            self._request("POST", "/rivers", data=_strip_forbidden(config))
+        )
 
     def update_river(self, cross_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         """Read-modify-write: GET current, deep-merge patch, PUT full body."""

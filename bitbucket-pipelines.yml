@@ -1,0 +1,90 @@
+# Bitbucket Pipelines for boomi-data-integration-terraform.
+#
+# On every PR (and on main pushes), runs in parallel:
+#   - lint:  ruff check + ruff format --check (pinned 0.15.16, matches dev-agent)
+#   - test:  pytest unit tests (pure helpers, no network)
+#   - e2e-smoke: read-only `riverctl list` against integration (gated on creds)
+#
+# A full create -> update -> destroy e2e loop is available as a manual
+# custom pipeline (`e2e-full`) so PRs don't create rivers on every run.
+#
+# Required repository variables (Repository settings > Repository variables)
+# for the integration e2e steps — set these as *secured*:
+#   CLI_TOKEN        Rivery API bearer token for the integration account
+#   API_URL          https://api.integration.rivery.in
+#   ACCOUNT_ID       integration account id
+#   ENVIRONMENT_ID   integration environment id
+# When CLI_TOKEN is absent the e2e steps no-op (so forks/external PRs pass).
+
+image: python:3.11-slim
+
+definitions:
+  caches:
+    uv-cache: ~/.cache/uv
+  steps:
+    - step: &lint
+        name: Lint (ruff 0.15.16)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - uvx ruff@0.15.16 check .
+          - uvx ruff@0.15.16 format --check .
+
+    - step: &test
+        name: Unit tests (pytest)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - uv run --with pytest --with requests pytest tests/ -v
+
+    - step: &e2e-smoke
+        name: E2E smoke (read-only list, integration)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - |
+            if [ -z "$CLI_TOKEN" ]; then
+              echo "No CLI_TOKEN repo variable set — skipping integration e2e smoke."
+              exit 0
+            fi
+          - export DATA_INTEGRATION_API_TOKEN="$CLI_TOKEN"
+          - export DATA_INTEGRATION_API_URL="$API_URL"
+          - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
+          - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
+          - uv run riverctl.py list
+
+    - step: &e2e-full
+        name: E2E full loop (create -> update -> destroy, integration)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - |
+            if [ -z "$CLI_TOKEN" ]; then
+              echo "No CLI_TOKEN repo variable set — cannot run full e2e."
+              exit 1
+            fi
+          - export DATA_INTEGRATION_API_TOKEN="$CLI_TOKEN"
+          - export DATA_INTEGRATION_API_URL="$API_URL"
+          - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
+          - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
+          # unique name per build so concurrent runs don't collide
+          - sed -i "s/zzz-iac-poc-logic-flow/zzz-iac-ci-${BITBUCKET_BUILD_NUMBER}/" rivers/poc_logic_flow.json
+          - uv run riverctl.py apply     # create
+          - uv run riverctl.py plan      # expect no-op
+          - uv run riverctl.py destroy   # cleanup — always leaves integration clean
+
+pipelines:
+  pull-requests:
+    '**':
+      - parallel:
+          - step: *lint
+          - step: *test
+          - step: *e2e-smoke
+  branches:
+    main:
+      - parallel:
+          - step: *lint
+          - step: *test
+  custom:
+    e2e-full:
+      - step: *e2e-full

@@ -22,6 +22,7 @@ git clone/commit/push and the loop is unchanged.
 Usage:
   RIVERY_IAC_ENV_FILE=/path/to/integration.local.env uv run riverctl.py plan
 """
+
 from __future__ import annotations
 
 import argparse
@@ -71,7 +72,9 @@ def _load_desired() -> dict[str, dict[str, Any]]:
 
 def cmd_list(client: RiveryClient, _: argparse.Namespace) -> int:
     rivers = client.list_rivers()
-    print(f"{len(rivers)} river(s) in account {client.account_id} / env {client.env_id}:")
+    print(
+        f"{len(rivers)} river(s) in account {client.account_id} / env {client.env_id}:"
+    )
     for r in rivers[:25]:
         print(f"  {r.get('id')}  {r.get('title')}")
     if len(rivers) > 25:
@@ -93,7 +96,9 @@ def cmd_plan(client: RiveryClient, _: argparse.Namespace) -> int:
             print(f"  = NO-OP   {name}  (cross_id={tracked.get('cross_id')})")
     orphans = set(state) - set(desired)
     for name in sorted(orphans):
-        print(f"  - DESTROY {name}  (cross_id={state[name].get('cross_id')}) — no longer in rivers/")
+        print(
+            f"  - DESTROY {name}  (cross_id={state[name].get('cross_id')}) — no longer in rivers/"
+        )
     return 0
 
 
@@ -146,8 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"credential error: {e}", file=sys.stderr)
         return 2
     print(f"# state: {_state_file()}")
-    return {"plan": cmd_plan, "apply": cmd_apply,
-            "destroy": cmd_destroy, "list": cmd_list}[args.cmd](client, args)
+    return {
+        "plan": cmd_plan,
+        "apply": cmd_apply,
+        "destroy": cmd_destroy,
+        "list": cmd_list,
+    }[args.cmd](client, args)
 
 
 if __name__ == "__main__":
