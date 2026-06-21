@@ -48,3 +48,9 @@ Thumbs.db
 *.mov
 *.wmv
 
+
+# rivers-as-code POC
+.state/
+*.env
+.venv/
+__pycache__/
