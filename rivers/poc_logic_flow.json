@@ -1,0 +1,20 @@
+{
+  "kind": "main_river",
+  "type": "logic",
+  "name": "zzz-iac-poc-logic-flow",
+  "metadata": {
+    "description": "rivers-as-code POC — UPDATED via riverctl read-modify-write. Safe to delete."
+  },
+  "settings": {},
+  "properties": {
+    "properties_type": "logic",
+    "logic_steps": [
+      {
+        "type": "river",
+        "name": "noop-step",
+        "river_id": "64299bd96cf5e100111b95a1",
+        "input_variables": {}
+      }
+    ]
+  }
+}

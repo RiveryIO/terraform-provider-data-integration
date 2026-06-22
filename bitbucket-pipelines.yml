@@ -1,0 +1,116 @@
+# Bitbucket Pipelines for boomi-data-integration-terraform.
+#
+# On every PR (and on main pushes), runs in parallel:
+#   - lint:  ruff check + ruff format --check (pinned 0.15.16, matches dev-agent)
+#   - test:  pytest unit tests (pure helpers, no network)
+#   - e2e-smoke: read-only `riverctl list` against integration (gated on creds)
+#
+# A full create -> update -> destroy e2e loop is available as a manual
+# custom pipeline (`e2e-full`) so PRs don't create rivers on every run.
+#
+# Required repository variables (Repository settings > Repository variables)
+# for the integration e2e steps — set these as *secured*:
+#   CLI_TOKEN        Rivery API bearer token for the integration account
+#   API_URL          https://api.integration.rivery.in
+#   ACCOUNT_ID       integration account id
+#   ENVIRONMENT_ID   integration environment id
+# When CLI_TOKEN is absent the e2e steps no-op (so forks/external PRs pass).
+#
+# Risk-based auto-approve (pr-review-step) prerequisites (one-time, see
+# rivery-dev-agent skill `pr-review-automations`):
+#   - Repo variables: JFROG_USERNAME (unsecured), JFROG_TOKEN (secured) —
+#     to pull the pr-review-docker image. PR_AGENT_ROLE_ARN is workspace-level.
+#   - This repo's UUID {cbde2cd9-3cba-455b-8180-4dfa53d9fae0} must be added to
+#     the bitbucket-pr-agent-invoker OIDC trust policy (AWS acct 156932266416).
+#   - .pr-risk-assessment.md drives the score; PRs scoring <= 4 auto-approve.
+
+image: python:3.11-slim
+
+definitions:
+  caches:
+    uv-cache: ~/.cache/uv
+  steps:
+    - step: &lint
+        name: Lint (ruff 0.15.16)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - uvx ruff@0.15.16 check .
+          - uvx ruff@0.15.16 format --check .
+
+    - step: &test
+        name: Unit tests (pytest)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - uv run --with pytest --with requests pytest tests/ -v
+
+    - step: &e2e-smoke
+        name: E2E smoke (read-only list, integration)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - |
+            if [ -z "$CLI_TOKEN" ]; then
+              echo "No CLI_TOKEN repo variable set — skipping integration e2e smoke."
+              exit 0
+            fi
+          - export DATA_INTEGRATION_API_TOKEN="$CLI_TOKEN"
+          - export DATA_INTEGRATION_API_URL="$API_URL"
+          - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
+          - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
+          - uv run riverctl.py list
+
+    - step: &pr-review-step
+        name: AI PR Review + Risk-based Auto-Approve
+        oidc: true
+        image:
+          name: boomi.jfrog.io/boomi-docker-registry/rivery/pr-review-docker:latest
+          username: $JFROG_USERNAME
+          password: $JFROG_TOKEN
+        max-time: 20
+        script:
+          - export AWS_ROLE_ARN="$PR_AGENT_ROLE_ARN"   # workspace-level var on boomii
+          - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web-identity-token
+          - echo "$BITBUCKET_STEP_OIDC_TOKEN" > $AWS_WEB_IDENTITY_TOKEN_FILE
+          - export AWS_DEFAULT_REGION=us-east-1
+          # main.py invokes the bitbucket-pr-agent Lambda, which fires pr-risk-assessor
+          # async; PRs scoring <= 4 against .pr-risk-assessment.md are auto-approved.
+          - python /app/main.py
+
+    - step: &e2e-full
+        name: E2E full loop (create -> update -> destroy, integration)
+        caches: [uv-cache]
+        script:
+          - pip install --quiet uv
+          - |
+            if [ -z "$CLI_TOKEN" ]; then
+              echo "No CLI_TOKEN repo variable set — cannot run full e2e."
+              exit 1
+            fi
+          - export DATA_INTEGRATION_API_TOKEN="$CLI_TOKEN"
+          - export DATA_INTEGRATION_API_URL="$API_URL"
+          - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
+          - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
+          # unique name per build so concurrent runs don't collide
+          - sed -i "s/zzz-iac-poc-logic-flow/zzz-iac-ci-${BITBUCKET_BUILD_NUMBER}/" rivers/poc_logic_flow.json
+          - uv run riverctl.py apply     # create
+          - uv run riverctl.py plan      # expect no-op
+          - uv run riverctl.py destroy   # cleanup — always leaves integration clean
+
+pipelines:
+  pull-requests:
+    '**':
+      - parallel:
+          - step: *lint
+          - step: *test
+          - step: *e2e-smoke
+          - step: *pr-review-step
+  branches:
+    main:
+      - parallel:
+          - step: *lint
+          - step: *test
+  custom:
+    e2e-full:
+      - step: *e2e-full
