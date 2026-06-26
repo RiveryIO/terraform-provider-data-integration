@@ -76,7 +76,11 @@ func TestAccDataFlowResource(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					// settings_json has a server-side default that may not be set on import
+					// properties_json/settings_json are config-authoritative: on import
+					// they are populated from the server's *enriched* shape, which
+					// differs from the minimal configured value. Reconcile config to
+					// the server shape after import for a clean plan.
+					"properties_json",
 					"settings_json",
 				},
 			},

@@ -91,15 +91,19 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Required:   true,
 				CustomType: jsontypes.NormalizedType{},
 				Description: "The river properties object as JSON — must include a properties_type " +
-					"discriminator and (for logic flows) a non-empty logic_steps array. Compared " +
-					"semantically, so formatting differences do not produce diffs.",
+					"discriminator and (for logic flows) a non-empty logic_steps array. This value " +
+					"is config-authoritative: the API enriches it on write (logic_steps gain " +
+					"step_id/is_enabled/…), so the provider keeps your configured value and does not " +
+					"refresh it from the API. Drift inside this blob is therefore not detected.",
 			},
 			"settings_json": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				CustomType:  jsontypes.NormalizedType{},
-				Default:     stringdefault.StaticString("{}"),
-				Description: "The river settings object as JSON. Defaults to an empty object.",
+				Optional:   true,
+				Computed:   true,
+				CustomType: jsontypes.NormalizedType{},
+				Default:    stringdefault.StaticString("{}"),
+				Description: "The river settings object as JSON. Defaults to an empty object. " +
+					"Config-authoritative like properties_json (the API adds a notification block " +
+					"on write); the provider does not refresh it from the API.",
 			},
 		},
 	}
@@ -268,20 +272,30 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 		}
 	}
 
-	// properties / settings round-trip as normalized JSON
-	if props, ok := api["properties"].(map[string]any); ok {
-		if raw, err := json.Marshal(props); err == nil {
-			m.PropertiesJSON = jsontypes.NewNormalizedValue(string(raw))
-		} else {
-			diags.AddError("Error encoding properties", err.Error())
+	// properties_json / settings_json are config-authoritative JSON passthrough.
+	// The API enriches them on write (logic_steps gain step_id/is_enabled/…,
+	// settings gains a notification block), so echoing the server value back
+	// would (a) break Terraform's plan==apply consistency contract and (b)
+	// produce a perpetual diff on refresh. We therefore preserve the configured
+	// value and only populate from the server when it is absent — i.e. on
+	// import, where there is no prior config to honor.
+	if m.PropertiesJSON.IsNull() || m.PropertiesJSON.IsUnknown() {
+		if props, ok := api["properties"].(map[string]any); ok {
+			if raw, err := json.Marshal(props); err == nil {
+				m.PropertiesJSON = jsontypes.NewNormalizedValue(string(raw))
+			} else {
+				diags.AddError("Error encoding properties", err.Error())
+			}
 		}
 	}
-	if settings, ok := api["settings"].(map[string]any); ok {
-		if raw, err := json.Marshal(settings); err == nil {
-			m.SettingsJSON = jsontypes.NewNormalizedValue(string(raw))
+	if m.SettingsJSON.IsNull() || m.SettingsJSON.IsUnknown() {
+		if settings, ok := api["settings"].(map[string]any); ok {
+			if raw, err := json.Marshal(settings); err == nil {
+				m.SettingsJSON = jsontypes.NewNormalizedValue(string(raw))
+			}
+		} else {
+			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
-	} else if m.SettingsJSON.IsUnknown() {
-		m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 	}
 	return diags
 }

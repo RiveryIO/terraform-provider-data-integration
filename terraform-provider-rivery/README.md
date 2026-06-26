@@ -75,13 +75,28 @@ export DATA_INTEGRATION_API_TOKEN=... DATA_INTEGRATION_ACCOUNT_ID=... \
 make testacc
 ```
 
+## Verification status (live integration)
+
+- **`rivery_data_flow` — verified.** `TestAccDataFlowResource` passes against
+  `api.integration.rivery.in`: create → import-verify → update → destroy, with
+  idempotency. This confirmed the read≠write handling — the API enriches
+  `logic_steps`/`settings` on write, so `properties_json`/`settings_json` are
+  treated as **config-authoritative** (kept from config, not refreshed from the
+  API; drift inside the blob is not detected).
+- **`rivery_environment` — auth path verified, create blocked by permissions.**
+  The provider correctly authenticated and called the API, which returned
+  `403 Insufficient permissions` on environment creation — the integration CLI
+  token is environment-scoped, not account-admin. Run with an account-admin
+  token to exercise `TestAccEnvironmentResource`.
+- **`rivery_connection` — not yet live-tested.** Needs a valid connection
+  `type` + `parameters_json` for the target account; confirm `/connections`
+  scoping on first run.
+
 ## Known gaps / next steps
 
-- **Live e2e not yet run** — the provider is unit-tested and verified via
-  `terraform validate` + `terraform plan` against the built binary, but the
-  `TF_ACC` CRUD suite has not been executed against a live integration account.
-- **Endpoint paths** are modelled from the POC client + design note; confirm
-  against the live API (especially connection scoping) when running `TF_ACC`.
+- **Endpoint paths** for `connection` are modelled from the POC client + design
+  note; confirm `/connections` scoping against the live API when running its
+  `TF_ACC` test.
 - **Generated client** — the design note targets generating the client from the
   public OpenAPI spec. This MVP hand-writes the client and resources; swapping in
   a generated client layer is the next structural step.
