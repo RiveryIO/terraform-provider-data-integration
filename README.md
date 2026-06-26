@@ -125,12 +125,15 @@ the CORE-2346 epic for the run log.
 
 ## Roadmap
 
-1. **POC (this repo, now):** `riverctl` rivers-as-code loop + design note. ✅
+1. **POC:** `riverctl` rivers-as-code loop + design note. ✅
 2. **State backend:** move `.state/` to S3 (+locking); keep `rivers/` in git.
-3. **Terraform provider:** `terraform-provider-rivery` (Go + terraform-plugin-framework),
-   client generated from the public OpenAPI; MVP resources environment → connection →
-   variable → river; import + acceptance tests; Registry publish. See
-   `docs/CORE-2346-comparison.md`.
+3. **Terraform provider — MVP:** `terraform-provider-rivery/` (Go + terraform-plugin-framework),
+   client ported from `rivery_client.py`; resources `rivery_environment` → `rivery_connection`
+   → `rivery_data_flow` with full CRUD + `import`; unit tests + `TF_ACC` acceptance tests +
+   examples + Registry docs. ✅ (live `TF_ACC` run pending — see
+   `terraform-provider-rivery/README.md`). See `docs/CORE-2346-comparison.md`.
+4. **Provider — next:** generate the client from the public OpenAPI; add
+   `rivery_dataframe` / `rivery_variable`; resolve auth TTL/refresh; GoReleaser → Registry publish.
 
 **Open question carried from the plan:** customer auth for unattended `apply` — bearer-token
 model exists today; confirm token TTL / refresh strategy for CI.
