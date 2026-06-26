@@ -1,10 +1,10 @@
 ---
-page_title: "rivery_data_flow Resource"
+page_title: "boomi_data_flow Resource"
 description: |-
   A Data Integration data flow (the API calls this a "river").
 ---
 
-# rivery_data_flow (Resource)
+# boomi_data_flow (Resource)
 
 A Data Integration data flow. The API calls this a "river"; the provider uses
 the customer-facing **data flow** terminology.
@@ -16,8 +16,8 @@ every field, and matches the design note's JSON-passthrough strategy.
 ## Example Usage
 
 ```terraform
-resource "rivery_data_flow" "daily_load" {
-  environment_id = rivery_environment.prod.id
+resource "boomi_data_flow" "daily_load" {
+  environment_id = boomi_environment.prod.id
   name           = "daily-warehouse-load"
   description    = "Loads the daily batch"
   type           = "logic"
@@ -72,5 +72,5 @@ returns; run `terraform plan` after the first apply to confirm an empty diff.
 ## Import
 
 ```shell
-terraform import rivery_data_flow.daily_load <environment_id>/<data_flow_id>
+terraform import boomi_data_flow.daily_load <environment_id>/<data_flow_id>
 ```

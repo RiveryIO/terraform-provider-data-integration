@@ -1,4 +1,4 @@
-PROVIDER := terraform-provider-rivery
+PROVIDER := terraform-provider-data-integration
 VERSION  ?= dev
 
 .PHONY: build install test testacc fmt vet lint docs tidy
@@ -30,4 +30,4 @@ tidy:
 
 # Regenerate registry docs from schema (requires tfplugindocs on PATH).
 docs:
-	tfplugindocs generate --provider-name rivery
+	tfplugindocs generate --provider-name data-integration

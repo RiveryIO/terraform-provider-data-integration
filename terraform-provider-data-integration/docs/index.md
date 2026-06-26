@@ -1,35 +1,35 @@
 ---
-page_title: "rivery Provider"
+page_title: "boomi Provider"
 description: |-
   Manage Boomi Data Integration (Rivery) resources as code.
 ---
 
-# rivery Provider
+# boomi Provider
 
-The `rivery` provider lets teams manage Boomi **Data Integration** resources —
+The `boomi` provider lets teams manage Boomi **Data Integration** resources —
 environments, connections, and data flows — as code, planned and applied
 through standard Terraform workflows.
 
 > The customer-facing term is **data flow**; the underlying API path is
 > `/rivers`. The provider's public surface uses Data Integration terminology
-> (`rivery_data_flow`).
+> (`boomi_data_flow`).
 
 ## Example Usage
 
 ```terraform
 terraform {
   required_providers {
-    rivery = {
-      source = "boomi/rivery"
+    boomi = {
+      source = "boomi/data-integration"
     }
   }
 }
 
-provider "rivery" {
+provider "boomi" {
   # Prefer environment variables for credentials (see below).
 }
 
-resource "rivery_environment" "prod" {
+resource "boomi_environment" "prod" {
   name = "production"
 }
 ```
@@ -48,7 +48,7 @@ variable; the attribute wins when both are set.
 | `environment_id` | `DATA_INTEGRATION_ENVIRONMENT_ID` | no       | —                       |
 
 `environment_id` sets a default environment for environment-scoped resources
-(`rivery_connection`, `rivery_data_flow`) that do not declare their own.
+(`boomi_connection`, `boomi_data_flow`) that do not declare their own.
 
 ## Schema
 

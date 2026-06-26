@@ -13,7 +13,7 @@ import (
 // testAccProtoV6ProviderFactories wires the in-process provider for acceptance
 // tests (used only when TF_ACC is set).
 var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
-	"rivery": providerserver.NewProtocol6WithError(New("test")()),
+	"boomi": providerserver.NewProtocol6WithError(New("test")()),
 }
 
 func TestProviderSchemaValid(t *testing.T) {

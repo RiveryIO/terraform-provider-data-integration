@@ -31,21 +31,21 @@ func TestAccEnvironmentResource(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccEnvironmentConfig("tf-acc-env", "managed by terraform-provider-rivery"),
+				Config: testAccEnvironmentConfig("tf-acc-env", "managed by terraform-provider-data-integration"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("rivery_environment.test", "id"),
-					resource.TestCheckResourceAttr("rivery_environment.test", "name", "tf-acc-env"),
+					resource.TestCheckResourceAttrSet("boomi_environment.test", "id"),
+					resource.TestCheckResourceAttr("boomi_environment.test", "name", "tf-acc-env"),
 				),
 			},
 			{
-				ResourceName:      "rivery_environment.test",
+				ResourceName:      "boomi_environment.test",
 				ImportState:       true,
 				ImportStateVerify: true, // imported state must plan clean
 			},
 			{
 				Config: testAccEnvironmentConfig("tf-acc-env-renamed", "updated description"),
 				Check: resource.TestCheckResourceAttr(
-					"rivery_environment.test", "name", "tf-acc-env-renamed"),
+					"boomi_environment.test", "name", "tf-acc-env-renamed"),
 			},
 		},
 	})
@@ -66,13 +66,13 @@ func TestAccDataFlowResource(t *testing.T) {
 			{
 				Config: testAccDataFlowConfig("tf-acc-flow", "first", subRiverID),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("rivery_data_flow.test", "id"),
-					resource.TestCheckResourceAttr("rivery_data_flow.test", "name", "tf-acc-flow"),
-					resource.TestCheckResourceAttr("rivery_data_flow.test", "description", "first"),
+					resource.TestCheckResourceAttrSet("boomi_data_flow.test", "id"),
+					resource.TestCheckResourceAttr("boomi_data_flow.test", "name", "tf-acc-flow"),
+					resource.TestCheckResourceAttr("boomi_data_flow.test", "description", "first"),
 				),
 			},
 			{
-				ResourceName:      "rivery_data_flow.test",
+				ResourceName:      "boomi_data_flow.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
@@ -87,7 +87,7 @@ func TestAccDataFlowResource(t *testing.T) {
 			{
 				Config: testAccDataFlowConfig("tf-acc-flow", "second", subRiverID),
 				Check: resource.TestCheckResourceAttr(
-					"rivery_data_flow.test", "description", "second"),
+					"boomi_data_flow.test", "description", "second"),
 			},
 		},
 	})
@@ -95,9 +95,9 @@ func TestAccDataFlowResource(t *testing.T) {
 
 func testAccEnvironmentConfig(name, desc string) string {
 	return fmt.Sprintf(`
-provider "rivery" {}
+provider "boomi" {}
 
-resource "rivery_environment" "test" {
+resource "boomi_environment" "test" {
   name        = %q
   description = %q
 }
@@ -106,9 +106,9 @@ resource "rivery_environment" "test" {
 
 func testAccDataFlowConfig(name, desc, subRiverID string) string {
 	return fmt.Sprintf(`
-provider "rivery" {}
+provider "boomi" {}
 
-resource "rivery_data_flow" "test" {
+resource "boomi_data_flow" "test" {
   name        = %q
   description = %q
   type        = "logic"

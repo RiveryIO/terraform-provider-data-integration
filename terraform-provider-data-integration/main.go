@@ -1,6 +1,6 @@
-// terraform-provider-rivery is the Terraform provider for Boomi Data
-// Integration (Rivery). It lets teams declare environments, connections and
-// data flows in .tf and reconcile them through the Data Integration API.
+// terraform-provider-data-integration is the Terraform provider for Boomi Data
+// Integration. It lets teams declare environments, connections and data flows
+// in .tf and reconcile them through the Data Integration API.
 package main
 
 import (
@@ -8,7 +8,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/boomi/terraform-provider-rivery/internal/provider"
+	"github.com/boomi/terraform-provider-data-integration/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
@@ -21,8 +21,8 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		// Registry address: namespace/type → boomi/rivery.
-		Address: "registry.terraform.io/boomi/rivery",
+		// Registry address: namespace/type → boomi/data-integration.
+		Address: "registry.terraform.io/boomi/data-integration",
 		Debug:   debug,
 	}
 

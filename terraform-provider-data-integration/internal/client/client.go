@@ -27,7 +27,7 @@ const (
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
 	defaultBackoff    = time.Second
-	userAgent         = "terraform-provider-rivery/0.1.0"
+	userAgent         = "terraform-provider-data-integration/0.1.0"
 )
 
 // writeForbiddenFields are stripped before every write — the API rejects them

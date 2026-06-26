@@ -1,7 +1,9 @@
-# GoReleaser config for publishing terraform-provider-rivery to the
+# GoReleaser config for publishing terraform-provider-data-integration to the
 # Terraform Registry (signed builds). See https://goreleaser.com and
 # https://developer.hashicorp.com/terraform/registry/providers/publishing
 version: 2
+
+project_name: terraform-provider-data-integration
 
 before:
   hooks:

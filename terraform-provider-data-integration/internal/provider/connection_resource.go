@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/boomi/terraform-provider-rivery/internal/client"
+	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"

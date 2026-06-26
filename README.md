@@ -127,11 +127,11 @@ the CORE-2346 epic for the run log.
 
 1. **POC:** `riverctl` rivers-as-code loop + design note. ✅
 2. **State backend:** move `.state/` to S3 (+locking); keep `rivers/` in git.
-3. **Terraform provider — MVP:** `terraform-provider-rivery/` (Go + terraform-plugin-framework),
-   client ported from `rivery_client.py`; resources `rivery_environment` → `rivery_connection`
-   → `rivery_data_flow` with full CRUD + `import`; unit tests + `TF_ACC` acceptance tests +
-   examples + Registry docs. ✅ (live `TF_ACC` run pending — see
-   `terraform-provider-rivery/README.md`). See `docs/CORE-2346-comparison.md`.
+3. **Terraform provider — MVP:** `terraform-provider-data-integration/` (Go + terraform-plugin-framework),
+   client ported from `rivery_client.py`; resources `boomi_environment` → `boomi_connection`
+   → `boomi_data_flow` with full CRUD + `import`; unit tests + `TF_ACC` acceptance tests +
+   examples + Registry docs. ✅ (`boomi_data_flow` verified live against integration; see
+   `terraform-provider-data-integration/README.md`). See `docs/CORE-2346-comparison.md`.
 4. **Provider — next:** generate the client from the public OpenAPI; add
    `rivery_dataframe` / `rivery_variable`; resolve auth TTL/refresh; GoReleaser → Registry publish.
 

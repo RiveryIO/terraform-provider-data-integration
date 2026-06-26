@@ -1,4 +1,4 @@
-module github.com/boomi/terraform-provider-rivery
+module github.com/boomi/terraform-provider-data-integration
 
 go 1.23
 

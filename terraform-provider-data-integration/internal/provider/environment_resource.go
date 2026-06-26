@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/boomi/terraform-provider-rivery/internal/client"
+	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"

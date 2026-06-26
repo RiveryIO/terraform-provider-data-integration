@@ -1,15 +1,16 @@
 // Package provider implements the Boomi Data Integration Terraform provider.
 //
 // The public surface uses Data Integration terminology — the provider is
-// "rivery", resources are rivery_data_flow / rivery_connection /
-// rivery_environment — even though the underlying API speaks "river".
+// "boomi", resources are boomi_data_flow /
+// boomi_connection / boomi_environment — even though the
+// underlying API speaks "river".
 package provider
 
 import (
 	"context"
 	"os"
 
-	"github.com/boomi/terraform-provider-rivery/internal/client"
+	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -21,10 +22,10 @@ import (
 const defaultAPIURL = "https://api.rivery.io"
 
 // Ensure the provider satisfies the framework interface.
-var _ provider.Provider = (*riveryProvider)(nil)
+var _ provider.Provider = (*dataIntegrationProvider)(nil)
 
-// riveryProvider is the provider implementation.
-type riveryProvider struct {
+// dataIntegrationProvider is the provider implementation.
+type dataIntegrationProvider struct {
 	// version is set at build time and surfaced in the user agent.
 	version string
 }
@@ -40,18 +41,18 @@ type providerModel struct {
 // New returns a provider factory for the given build version.
 func New(version string) func() provider.Provider {
 	return func() provider.Provider {
-		return &riveryProvider{version: version}
+		return &dataIntegrationProvider{version: version}
 	}
 }
 
-func (p *riveryProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
-	resp.TypeName = "rivery"
+func (p *dataIntegrationProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "boomi"
 	resp.Version = p.version
 }
 
-func (p *riveryProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+func (p *dataIntegrationProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage Boomi Data Integration (Rivery) resources as code. " +
+		Description: "Manage Boomi Data Integration resources as code. " +
 			"Authenticates with a Data Integration API token scoped to an account.",
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
@@ -87,7 +88,7 @@ type providerData struct {
 	defaultEnvironmentID string
 }
 
-func (p *riveryProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+func (p *dataIntegrationProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var cfg providerModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
@@ -125,7 +126,7 @@ func (p *riveryProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.ResourceData = data
 }
 
-func (p *riveryProvider) Resources(_ context.Context) []func() resource.Resource {
+func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewEnvironmentResource,
 		NewConnectionResource,
@@ -133,7 +134,7 @@ func (p *riveryProvider) Resources(_ context.Context) []func() resource.Resource
 	}
 }
 
-func (p *riveryProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return nil
 }
 
