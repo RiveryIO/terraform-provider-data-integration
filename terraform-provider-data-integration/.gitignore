@@ -1,0 +1,15 @@
+# Build output
+/bin/
+terraform-provider-rivery
+dist/
+
+# Local terraform state / plugin cache from examples
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Local CLI config / dev overrides
+*.tfrc
