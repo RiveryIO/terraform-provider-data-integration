@@ -76,7 +76,7 @@ func (r *environmentResource) Create(ctx context.Context, req resource.CreateReq
 
 	created, err := r.data.client.CreateEnvironment(ctx, body)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating environment", err.Error())
+		addAPIError(&resp.Diagnostics, "Error creating environment", err)
 		return
 	}
 	r.apply(created, &plan)
@@ -96,7 +96,15 @@ func (r *environmentResource) Read(ctx context.Context, req resource.ReadRequest
 			resp.State.RemoveResource(ctx) // drift: deleted out-of-band
 			return
 		}
-		resp.Diagnostics.AddError("Error reading environment", err.Error())
+		addAPIError(&resp.Diagnostics, "Error reading environment", err)
+		return
+	}
+	// Environment delete is a server-side soft-delete: the record stays readable
+	// with is_deleted=true. Treat that as gone so out-of-band deletes are detected
+	// and we never re-issue a DELETE against an already-deleted env (which the API
+	// answers with a 500 rather than a 404).
+	if isTrue(env["is_deleted"]) {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 	r.apply(env, &state)
@@ -119,7 +127,7 @@ func (r *environmentResource) Update(ctx context.Context, req resource.UpdateReq
 
 	updated, err := r.data.client.UpdateEnvironment(ctx, plan.ID.ValueString(), patch)
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating environment", err.Error())
+		addAPIError(&resp.Diagnostics, "Error updating environment", err)
 		return
 	}
 	r.apply(updated, &plan)
@@ -136,7 +144,7 @@ func (r *environmentResource) Delete(ctx context.Context, req resource.DeleteReq
 		if errors.Is(err, client.ErrNotFound) {
 			return // already gone
 		}
-		resp.Diagnostics.AddError("Error deleting environment", err.Error())
+		addAPIError(&resp.Diagnostics, "Error deleting environment", err)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -60,15 +61,19 @@ func (e *APIError) Error() string {
 // exception hierarchy). Callers use errors.Is to branch — most importantly on
 // ErrNotFound, which Read handlers translate into state removal.
 var (
-	ErrAuth       = errors.New("authentication failed (401/403)")
-	ErrNotFound   = errors.New("resource not found (404)")
-	ErrValidation = errors.New("validation failed (400/422)")
+	ErrAuth         = errors.New("authentication failed (401/403)")
+	ErrUnauthorized = fmt.Errorf("invalid or expired credentials (401): %w", ErrAuth)
+	ErrForbidden    = fmt.Errorf("insufficient permissions (403): %w", ErrAuth)
+	ErrNotFound     = errors.New("resource not found (404)")
+	ErrValidation   = errors.New("validation failed (400/422)")
 )
 
 func (e *APIError) Unwrap() error {
 	switch e.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return ErrAuth
+	case http.StatusUnauthorized:
+		return ErrUnauthorized // wraps ErrAuth, so errors.Is(err, ErrAuth) still holds
+	case http.StatusForbidden:
+		return ErrForbidden // wraps ErrAuth
 	case http.StatusNotFound:
 		return ErrNotFound
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
@@ -268,15 +273,27 @@ func normalizeID(raw map[string]any) map[string]any {
 	if raw == nil {
 		return raw
 	}
-	for _, k := range []string{"id", "river_cross_id", "cross_id", "_id"} {
+	// The API exposes id/name/type under resource-specific keys (rivers use
+	// cross_id + name + type; connections use connection_name + connection_type_id;
+	// environments use environment_name). Normalize them to the canonical keys the
+	// resource apply() mappers read, so every resource round-trips cleanly.
+	normalizeField(raw, "id", "id", "river_cross_id", "cross_id", "_id")
+	normalizeField(raw, "name", "name", "connection_name", "environment_name", "river_name")
+	normalizeField(raw, "type", "type", "connection_type_id", "river_type")
+	return raw
+}
+
+// normalizeField copies the first present, non-empty string value among src keys
+// into raw[dest], leaving raw untouched if none are found.
+func normalizeField(raw map[string]any, dest string, srcKeys ...string) {
+	for _, k := range srcKeys {
 		if v, ok := raw[k]; ok {
 			if s, ok := v.(string); ok && s != "" {
-				raw["id"] = s
-				return raw
+				raw[dest] = s
+				return
 			}
 		}
 	}
-	return raw
 }
 
 // ---- Data flows (rivers) ---------------------------------------------------
@@ -428,4 +445,109 @@ func (c *Client) UpdateEnvironment(ctx context.Context, id string, patch map[str
 // DeleteEnvironment deletes an environment by id.
 func (c *Client) DeleteEnvironment(ctx context.Context, id string) error {
 	return c.request(ctx, http.MethodDelete, c.accountPath("/environments/"+id), nil, nil)
+}
+
+// ---- Dataframes (environment-scoped, keyed by name) ------------------------
+//
+// Unlike rivers/connections, the dataframes API keys resources by their unique
+// `name` rather than a cross_id, and the response carries no id field — so the
+// resource uses the name as its Terraform id. Only connection_settings is
+// mutable on update.
+
+// GetDataFrame fetches a dataframe by name.
+func (c *Client) GetDataFrame(ctx context.Context, environmentID, name string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/dataframes/"+name), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateDataFrame POSTs a new dataframe. body must carry name and (optionally)
+// connection_settings.
+func (c *Client) CreateDataFrame(ctx context.Context, environmentID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/dataframes"), body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateDataFrame PUTs a dataframe by name. The API only accepts
+// connection_settings on update (the name is immutable).
+func (c *Client) UpdateDataFrame(ctx context.Context, environmentID, name string, patch map[string]any) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/dataframes/"+name), patch, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteDataFrame deletes a dataframe by name.
+func (c *Client) DeleteDataFrame(ctx context.Context, environmentID, name string) error {
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/dataframes/"+name), nil, nil)
+}
+
+// ---- CDC config (river-scoped CDC offset) ----------------------------------
+//
+// The CDC offset is the source position a CDC river resumes from (mysql binlog,
+// postgres lsn, sqlserver lsn, mongodb resume token, oracle scn). It only exists
+// for a CDC-enabled river that has fetched changes; GET 400s until then. The
+// body shape is { "config": { "datasource_type": "...", <offset fields> } }.
+// Set is a single POST (create == update); there is no PUT.
+
+// GetCDCConfig fetches a river's CDC offset config. Returns ErrValidation (400)
+// when the river is CDC but no offset has materialized yet.
+func (c *Client) GetCDCConfig(ctx context.Context, environmentID, riverID string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetCDCConfig sets (creates or overwrites) a river's CDC offset. body must be
+// the full { "config": {...} } envelope.
+func (c *Client) SetCDCConfig(ctx context.Context, environmentID, riverID string, body map[string]any) error {
+	return c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), body, nil)
+}
+
+// DeleteCDCConfig removes a river's CDC offset.
+func (c *Client) DeleteCDCConfig(ctx context.Context, environmentID, riverID string) error {
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), nil, nil)
+}
+
+// ---- Environment variables (environment-scoped key/value collection) -------
+//
+// Variables are a flat key→value map on the environment, not individually
+// addressable resources. The API exposes: GET /variables (whole map),
+// PUT /variables (merge — only the keys sent are touched), and
+// DELETE /variables?variable_key=<key> (remove one). The provider models each
+// key as its own boomi_variable resource; merge semantics keep sibling keys
+// intact, and Read filters the map for the managed key.
+
+// ListVariables returns the environment's full variable map.
+func (c *Client) ListVariables(ctx context.Context, environmentID string) (map[string]any, error) {
+	var resp struct {
+		Variables map[string]any `json:"variables"`
+	}
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/variables"), nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Variables == nil {
+		resp.Variables = map[string]any{}
+	}
+	return resp.Variables, nil
+}
+
+// PutVariable adds or updates a single variable (merge — other keys untouched).
+func (c *Client) PutVariable(ctx context.Context, environmentID, key string, value any) error {
+	body := map[string]any{"variables": map[string]any{key: value}}
+	return c.request(ctx, http.MethodPut, c.envPath(environmentID, "/variables"), body, nil)
+}
+
+// DeleteVariable removes a single variable by key.
+func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) error {
+	suffix := "/variables?variable_key=" + url.QueryEscape(key)
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, suffix), nil, nil)
 }

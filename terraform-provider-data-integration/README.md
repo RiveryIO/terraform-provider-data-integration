@@ -83,20 +83,49 @@ make testacc
   `logic_steps`/`settings` on write, so `properties_json`/`settings_json` are
   treated as **config-authoritative** (kept from config, not refreshed from the
   API; drift inside the blob is not detected).
-- **`boomi_environment` — auth path verified, create blocked by permissions.**
-  The provider correctly authenticated and called the API, which returned
-  `403 Insufficient permissions` on environment creation — the integration CLI
-  token is environment-scoped, not account-admin. Run with an account-admin
-  token to exercise `TestAccEnvironmentResource`.
-- **`boomi_connection` — not yet live-tested.** Needs a valid connection
-  `type` + `parameters_json` for the target account; confirm `/connections`
-  scoping on first run.
+- **`boomi_environment` — verified (create → read → destroy).** Confirmed against
+  `api.integration.rivery.in` with an account-admin token. This exposed and fixed
+  a read-mapping bug: the API returns the id/name under `cross_id`/`_id` and
+  `environment_name`, which the resource now normalizes (see `normalizeID`).
+  Delete is a **soft-delete** server-side (`is_deleted: true`); the record remains
+  readable. With an environment-scoped (non-admin) token, create returns a clear
+  `403 insufficient permissions` diagnostic.
+- **`boomi_connection` — verified (create → read → destroy, idempotent).**
+  Confirmed live with a `redshift` connection. Two fixes were required: the
+  create/update body must use `connection_name`/`connection_type` (not the generic
+  `name`/`type`), and the read response maps `connection_name`/`connection_type_id`
+  via `normalizeID`. Connection writes are environment-scoped — the token must hold
+  the right role on the target `environment_id`.
+
+- **`boomi_dataframe` — verified (create → read → destroy, idempotent).**
+  Confirmed live referencing an existing S3 connection. Dataframes are
+  environment-scoped and keyed by **name** (no cross_id), so the resource uses
+  the name as its id; `connection_settings` is a typed nested block that
+  cross-references a `boomi_connection`. Delete is a hard delete (GET → 404),
+  unlike the environment soft-delete.
+
+- **`boomi_variable` — verified (create → read → in-place update → destroy, idempotent).**
+  Confirmed live against env `5ffeb0…`. Variables are an environment-scoped
+  key/value collection; each key is its own resource and writes merge (sibling
+  keys untouched). Requires a token with explicit `variables:list`/`variables:edit`
+  scopes — a `role:admin`-only env grant returns `403`.
+
+- **`boomi_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC river.**
+  Manages a CDC river's source offset (mysql binlog / pg+mssql lsn / mongo resume
+  token / oracle scn) via `config_json`. Create/update (single `POST`) and delete
+  (`DELETE`) verified live against a real river; the offset GET validates CDC-only,
+  so a genuinely CDC-enabled river is needed to exercise reads. Config-authoritative
+  (the offset advances at runtime; not drift-reconciled) — intended to seed/reset.
+
+### Auth error reporting
+
+`401` and `403` responses surface as actionable Terraform diagnostics (distinct
+"authentication failed" vs "insufficient permissions" messages with remediation
+hints). Programmatic callers can branch via `errors.Is(err, client.ErrUnauthorized)`,
+`client.ErrForbidden`, or the umbrella `client.ErrAuth`.
 
 ## Known gaps / next steps
 
-- **Endpoint paths** for `connection` are modelled from the POC client + design
-  note; confirm `/connections` scoping against the live API when running its
-  `TF_ACC` test.
 - **Generated client** — the design note targets generating the client from the
   public OpenAPI spec. This MVP hand-writes the client and resources; swapping in
   a generated client layer is the next structural step.

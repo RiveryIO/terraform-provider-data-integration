@@ -101,7 +101,9 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	body := map[string]any{"name": plan.Name.ValueString(), "type": plan.Type.ValueString()}
+	// The connections API speaks connection_name / connection_type (not the
+	// generic name/type used by rivers and environments).
+	body := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
 	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
 		mergeParams(body, params)
 	} else if resp.Diagnostics.HasError() {
@@ -110,7 +112,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 
 	created, err := r.data.client.CreateConnection(ctx, envID, body)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating connection", err.Error())
+		addAPIError(&resp.Diagnostics, "Error creating connection", err)
 		return
 	}
 	r.apply(created, envID, &plan)
@@ -130,7 +132,7 @@ func (r *connectionResource) Read(ctx context.Context, req resource.ReadRequest,
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Error reading connection", err.Error())
+		addAPIError(&resp.Diagnostics, "Error reading connection", err)
 		return
 	}
 	// apply preserves parameters_json from prior state — never overwritten from
@@ -147,7 +149,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	envID := plan.EnvironmentID.ValueString()
 
-	patch := map[string]any{"name": plan.Name.ValueString(), "type": plan.Type.ValueString()}
+	patch := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
 	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
 		mergeParams(patch, params)
 	} else if resp.Diagnostics.HasError() {
@@ -156,7 +158,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 
 	updated, err := r.data.client.UpdateConnection(ctx, envID, plan.ID.ValueString(), patch)
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating connection", err.Error())
+		addAPIError(&resp.Diagnostics, "Error updating connection", err)
 		return
 	}
 	r.apply(updated, envID, &plan)
@@ -173,7 +175,7 @@ func (r *connectionResource) Delete(ctx context.Context, req resource.DeleteRequ
 		if errors.Is(err, client.ErrNotFound) {
 			return
 		}
-		resp.Diagnostics.AddError("Error deleting connection", err.Error())
+		addAPIError(&resp.Diagnostics, "Error deleting connection", err)
 	}
 }
 

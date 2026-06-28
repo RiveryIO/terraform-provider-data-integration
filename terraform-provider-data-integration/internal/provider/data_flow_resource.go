@@ -134,7 +134,7 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 
 	created, err := r.data.client.CreateDataFlow(ctx, envID, body)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating data flow", err.Error())
+		addAPIError(&resp.Diagnostics, "Error creating data flow", err)
 		return
 	}
 	resp.Diagnostics.Append(r.apply(created, envID, &plan)...)
@@ -154,7 +154,7 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Error reading data flow", err.Error())
+		addAPIError(&resp.Diagnostics, "Error reading data flow", err)
 		return
 	}
 	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state)...)
@@ -176,7 +176,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 
 	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating data flow", err.Error())
+		addAPIError(&resp.Diagnostics, "Error updating data flow", err)
 		return
 	}
 	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
@@ -193,7 +193,7 @@ func (r *dataFlowResource) Delete(ctx context.Context, req resource.DeleteReques
 		if errors.Is(err, client.ErrNotFound) {
 			return
 		}
-		resp.Diagnostics.AddError("Error deleting data flow", err.Error())
+		addAPIError(&resp.Diagnostics, "Error deleting data flow", err)
 	}
 }
 
