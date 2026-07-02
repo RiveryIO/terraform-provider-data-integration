@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 var (
@@ -76,6 +77,23 @@ func (r *environmentResource) Create(ctx context.Context, req resource.CreateReq
 
 	created, err := r.data.client.CreateEnvironment(ctx, body)
 	if err != nil {
+		// 409 means the environment already exists (e.g. a re-apply after an
+		// interrupted apply where the API call succeeded but state was not written).
+		// Adopt the existing resource rather than failing.
+		if errors.Is(err, client.ErrConflict) {
+			var apiErr *client.APIError
+			if errors.As(err, &apiErr) && apiErr.ConflictID != "" {
+				tflog.Info(ctx, "environment already exists, adopting", map[string]any{"id": apiErr.ConflictID})
+				existing, readErr := r.data.client.GetEnvironment(ctx, apiErr.ConflictID)
+				if readErr != nil {
+					addAPIError(&resp.Diagnostics, "Error reading existing environment after conflict", readErr)
+					return
+				}
+				r.apply(existing, &plan)
+				resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+				return
+			}
+		}
 		addAPIError(&resp.Diagnostics, "Error creating environment", err)
 		return
 	}
@@ -141,8 +159,10 @@ func (r *environmentResource) Delete(ctx context.Context, req resource.DeleteReq
 		return
 	}
 	if err := r.data.client.DeleteEnvironment(ctx, state.ID.ValueString()); err != nil {
-		if errors.Is(err, client.ErrNotFound) {
-			return // already gone
+		// 404 = already deleted; 409 = deletion queued (async soft-delete in progress).
+		// Both mean the resource is on its way out — treat as success.
+		if errors.Is(err, client.ErrNotFound) || errors.Is(err, client.ErrConflict) {
+			return
 		}
 		addAPIError(&resp.Diagnostics, "Error deleting environment", err)
 	}

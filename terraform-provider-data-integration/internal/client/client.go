@@ -48,6 +48,11 @@ type APIError struct {
 	StatusCode int
 	Message    string
 	Details    string
+	// ConflictID is populated when StatusCode==409 and the server returned
+	// {"detail": {"error": "already_exists", "id": "<cross_id>"}}. Callers
+	// that receive ErrConflict can type-assert to *APIError and read this field
+	// to adopt the existing resource into state rather than failing.
+	ConflictID string
 }
 
 func (e *APIError) Error() string {
@@ -66,6 +71,7 @@ var (
 	ErrForbidden    = fmt.Errorf("insufficient permissions (403): %w", ErrAuth)
 	ErrNotFound     = errors.New("resource not found (404)")
 	ErrValidation   = errors.New("validation failed (400/422)")
+	ErrConflict     = errors.New("resource already exists (409)")
 )
 
 func (e *APIError) Unwrap() error {
@@ -78,6 +84,8 @@ func (e *APIError) Unwrap() error {
 		return ErrNotFound
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return ErrValidation
+	case http.StatusConflict:
+		return ErrConflict
 	}
 	return nil
 }
@@ -221,7 +229,21 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 			lastErr = &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
 			continue // 5xx — retry
 		default:
-			return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
+			apiErr := &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
+			if resp.StatusCode == http.StatusConflict {
+				// Parse {"detail": {"error": "already_exists", "id": "<cross_id>"}} so
+				// callers can adopt the existing resource without a separate lookup.
+				var body struct {
+					Detail struct {
+						Error string `json:"error"`
+						ID    string `json:"id"`
+					} `json:"detail"`
+				}
+				if json.Unmarshal(respBody, &body) == nil && body.Detail.ID != "" {
+					apiErr.ConflictID = body.Detail.ID
+				}
+			}
+			return apiErr
 		}
 	}
 	return lastErr
