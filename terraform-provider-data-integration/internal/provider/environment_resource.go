@@ -158,9 +158,25 @@ func (r *environmentResource) Delete(ctx context.Context, req resource.DeleteReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// Read before delete: the API returns 500 when DELETE is called on an environment
+	// that is already soft-deleted (is_deleted=true) or has deletion queued
+	// (is_delete_lock=true). Checking first avoids the broken endpoint entirely.
+	existing, err := r.data.client.GetEnvironment(ctx, state.ID.ValueString())
+	if err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			return // already gone
+		}
+		addAPIError(&resp.Diagnostics, "Error reading environment before delete", err)
+		return
+	}
+	if isTrue(existing["is_deleted"]) || isTrue(existing["is_delete_lock"]) {
+		return // soft-delete already in progress or complete
+	}
+
 	if err := r.data.client.DeleteEnvironment(ctx, state.ID.ValueString()); err != nil {
-		// 404 = already deleted; 409 = deletion queued (async soft-delete in progress).
-		// Both mean the resource is on its way out — treat as success.
+		// 404 = deleted between the read and the delete call.
+		// 409 = deletion was queued asynchronously between the read and the delete call.
 		if errors.Is(err, client.ErrNotFound) || errors.Is(err, client.ErrConflict) {
 			return
 		}
