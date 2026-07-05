@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 var (
@@ -77,20 +76,17 @@ func (r *environmentResource) Create(ctx context.Context, req resource.CreateReq
 
 	created, err := r.data.client.CreateEnvironment(ctx, body)
 	if err != nil {
-		// 409 means the environment already exists (e.g. a re-apply after an
-		// interrupted apply where the API call succeeded but state was not written).
-		// Adopt the existing resource rather than failing.
 		if errors.Is(err, client.ErrConflict) {
 			var apiErr *client.APIError
 			if errors.As(err, &apiErr) && apiErr.ConflictID != "" {
-				tflog.Info(ctx, "environment already exists, adopting", map[string]any{"id": apiErr.ConflictID})
-				existing, readErr := r.data.client.GetEnvironment(ctx, apiErr.ConflictID)
-				if readErr != nil {
-					addAPIError(&resp.Diagnostics, "Error reading existing environment after conflict", readErr)
-					return
-				}
-				r.apply(existing, &plan)
-				resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+				resp.Diagnostics.AddError(
+					"Environment already exists",
+					"An environment named \""+plan.Name.ValueString()+"\" already exists "+
+						"(id: "+apiErr.ConflictID+"). "+
+						"To manage it with Terraform run:\n\n"+
+						"  terraform import boomi_environment."+
+						"<resource_label> "+apiErr.ConflictID,
+				)
 				return
 			}
 		}
