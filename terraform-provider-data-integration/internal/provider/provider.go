@@ -131,6 +131,7 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 		NewEnvironmentResource,
 		NewConnectionResource,
 		NewDataFlowResource,
+		NewDataFlowRunResource,
 		NewDataFrameResource,
 		NewVariableResource,
 		NewCDCConfigResource,

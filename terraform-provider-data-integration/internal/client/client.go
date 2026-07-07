@@ -551,3 +551,54 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 	suffix := "/variables?variable_key=" + url.QueryEscape(key)
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, suffix), nil, nil)
 }
+
+// ---- Data flow runs (activate + trigger) -----------------------------------
+//
+// Running a data flow is a two-step imperative action, not a CRUD resource:
+// a flow must be active before it can run. ActivateDataFlow enables it (the API
+// answers 204 when already active, or 202 with an async operation to poll via
+// GetOperation), then RunDataFlow triggers an execution and returns the run id.
+
+// ActivateDataFlow activates (enables) a data flow. Returns the async operation
+// id to poll when the API defers activation (202); an empty id means activation
+// completed synchronously (204 / already active).
+func (c *Client) ActivateDataFlow(ctx context.Context, environmentID, id string) (string, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/activate_river"), nil, &out); err != nil {
+		return "", err
+	}
+	if op, ok := out["operation_id"].(string); ok {
+		return op, nil
+	}
+	return "", nil
+}
+
+// GetOperation returns an async operation's status ("W" working, "D" done,
+// "E" error) and any error message.
+func (c *Client) GetOperation(ctx context.Context, environmentID, operationID string) (status, errMsg string, err error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/operations/"+operationID), nil, &out); err != nil {
+		return "", "", err
+	}
+	status, _ = out["status"].(string)
+	errMsg, _ = out["error_message"].(string)
+	return status, errMsg, nil
+}
+
+// RunDataFlow triggers a run of a data flow, returning the first run id and the
+// run group id from the API's { runs: [{run_id,...}], run_group_id } response.
+func (c *Client) RunDataFlow(ctx context.Context, environmentID, id string) (runID, runGroupID string, err error) {
+	var out struct {
+		Runs []struct {
+			RunID string `json:"run_id"`
+		} `json:"runs"`
+		RunGroupID string `json:"run_group_id"`
+	}
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/run"), nil, &out); err != nil {
+		return "", "", err
+	}
+	if len(out.Runs) > 0 {
+		runID = out.Runs[0].RunID
+	}
+	return runID, out.RunGroupID, nil
+}
