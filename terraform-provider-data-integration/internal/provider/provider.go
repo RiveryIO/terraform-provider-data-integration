@@ -139,7 +139,10 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 }
 
 func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewConnectionTypesDataSource,
+		NewConnectionTypeDataSource,
+	}
 }
 
 func firstNonEmpty(vals ...string) string {

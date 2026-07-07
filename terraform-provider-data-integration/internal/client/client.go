@@ -602,3 +602,55 @@ func (c *Client) RunDataFlow(ctx context.Context, environmentID, id string) (run
 	}
 	return runID, out.RunGroupID, nil
 }
+
+// ---- Connection types (read-only catalog + per-type schema discovery) -------
+//
+// These are account-agnostic catalog endpoints (not account/environment scoped).
+// They let a data source surface the API's own connection-type schema at plan
+// time, so new connector types and fields appear without a provider release.
+
+// ListConnectionTypes returns the connection-type catalog. The API paginates
+// ({ items, next_page, ... }) and wraps each row in a "fields" object, which
+// this unwraps to the inner connection-type record.
+func (c *Client) ListConnectionTypes(ctx context.Context) ([]map[string]any, error) {
+	var all []map[string]any
+	// Page by incrementing index and stop on an empty page or once total_items
+	// is reached. (The list envelope's next_page is a string cursor, not an int,
+	// so we don't rely on its type — pageless termination is simpler and robust.)
+	const maxPages = 100 // safety backstop against a misbehaving cursor
+	for page := 1; page <= maxPages; page++ {
+		var resp struct {
+			Items      []map[string]any `json:"items"`
+			TotalItems int              `json:"total_items"`
+		}
+		url := fmt.Sprintf("%s/v1/connections_types?page=%d", c.baseURL, page)
+		if err := c.request(ctx, http.MethodGet, url, nil, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp.Items) == 0 {
+			break
+		}
+		for _, it := range resp.Items {
+			if f, ok := it["fields"].(map[string]any); ok {
+				all = append(all, f)
+			} else {
+				all = append(all, it)
+			}
+		}
+		if resp.TotalItems > 0 && len(all) >= resp.TotalItems {
+			break
+		}
+	}
+	return all, nil
+}
+
+// GetConnectionType returns one connection type's property schema —
+// { connection_type, connection_type_name, properties: [...] }.
+func (c *Client) GetConnectionType(ctx context.Context, connectionType string) (map[string]any, error) {
+	var out map[string]any
+	url := fmt.Sprintf("%s/v1/connections_types/%s", c.baseURL, connectionType)
+	if err := c.request(ctx, http.MethodGet, url, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
