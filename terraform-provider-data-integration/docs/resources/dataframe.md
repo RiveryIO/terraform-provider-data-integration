@@ -1,10 +1,10 @@
 ---
-page_title: "boomi_dataframe Resource"
+page_title: "boomi_data_integration_dataframe Resource"
 description: |-
   A Data Integration dataframe, keyed by name within an environment.
 ---
 
-# boomi_dataframe (Resource)
+# boomi_data_integration_dataframe (Resource)
 
 A Data Integration dataframe. Dataframes are environment-scoped and keyed by
 their unique **name** — the API has no separate id, so the resource uses the
@@ -13,12 +13,12 @@ name as its Terraform id.
 ## Example Usage
 
 ```terraform
-resource "boomi_dataframe" "my_df" {
-  environment_id = boomi_environment.prod.id
+resource "boomi_data_integration_dataframe" "my_df" {
+  environment_id = boomi_data_integration_environment.prod.id
   name           = "daily-export"
 
   connection_settings = {
-    connection     = boomi_connection.s3.id
+    connection     = boomi_data_integration_connection.s3.id
     datasource_id  = "aws"
     storage_type   = "s3"
     default_bucket = "rivery-dev-tests"
@@ -46,7 +46,7 @@ resource "boomi_dataframe" "my_df" {
 Required:
 
 - `connection` (String) ID of the storage connection — typically a reference to
-  a `boomi_connection`.
+  a `boomi_data_integration_connection`.
 - `datasource_id` (String) Datasource identifier of the connection (e.g. `s3`,
   `gcs`).
 - `storage_type` (String) Storage type (e.g. `s3`, `aws`, `gcs`).
@@ -61,10 +61,10 @@ Required:
 
 ```shell
 # environment-qualified
-terraform import boomi_dataframe.my_df <environment_id>/<name>
+terraform import boomi_data_integration_dataframe.my_df <environment_id>/<name>
 
 # bare name (requires provider-level environment_id)
-terraform import boomi_dataframe.my_df <name>
+terraform import boomi_data_integration_dataframe.my_df <name>
 ```
 
 `connection_settings` is config-authoritative — after import, declare it in

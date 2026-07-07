@@ -1,10 +1,10 @@
 ---
-page_title: "boomi_environment Resource"
+page_title: "boomi_data_integration_environment Resource"
 description: |-
   A Data Integration environment.
 ---
 
-# boomi_environment (Resource)
+# boomi_data_integration_environment (Resource)
 
 A Data Integration environment. Environments are account-scoped and group
 connections and data flows.
@@ -12,7 +12,7 @@ connections and data flows.
 ## Example Usage
 
 ```terraform
-resource "boomi_environment" "prod" {
+resource "boomi_data_integration_environment" "prod" {
   name        = "production"
   description = "Managed by terraform-provider-data-integration"
 }
@@ -35,5 +35,5 @@ resource "boomi_environment" "prod" {
 ## Import
 
 ```shell
-terraform import boomi_environment.prod <environment_id>
+terraform import boomi_data_integration_environment.prod <environment_id>
 ```

@@ -10,15 +10,15 @@ Tracks Jira epic **CORE-2346**. This is the MVP provider phase that follows the
 
 > The customer-facing term is **data flow**; the underlying API path is
 > `/rivers`. The public surface uses Data Integration terminology
-> (`boomi_data_flow`).
+> (`boomi_data_integration_data_flow`).
 
 ## Resources
 
 | Resource             | Scope     | API path        | CRUD | Import |
 |----------------------|-----------|-----------------|------|--------|
-| `boomi_environment` | account   | `/environments` | ✅    | ✅ `<id>` |
-| `boomi_connection`  | env       | `/connections`  | ✅    | ✅ `<env_id>/<id>` |
-| `boomi_data_flow`   | env       | `/rivers`       | ✅    | ✅ `<env_id>/<id>` |
+| `boomi_data_integration_environment` | account   | `/environments` | ✅    | ✅ `<id>` |
+| `boomi_data_integration_connection`  | env       | `/connections`  | ✅    | ✅ `<env_id>/<id>` |
+| `boomi_data_integration_data_flow`   | env       | `/rivers`       | ✅    | ✅ `<env_id>/<id>` |
 
 All resources support `import`, drift detection via `Read`, and force-replace on
 immutable fields (`environment_id`, connection `type`).
@@ -77,40 +77,40 @@ make testacc
 
 ## Verification status (live integration)
 
-- **`boomi_data_flow` — verified.** `TestAccDataFlowResource` passes against
+- **`boomi_data_integration_data_flow` — verified.** `TestAccDataFlowResource` passes against
   `api.integration.rivery.in`: create → import-verify → update → destroy, with
   idempotency. This confirmed the read≠write handling — the API enriches
   `logic_steps`/`settings` on write, so `properties_json`/`settings_json` are
   treated as **config-authoritative** (kept from config, not refreshed from the
   API; drift inside the blob is not detected).
-- **`boomi_environment` — verified (create → read → destroy).** Confirmed against
+- **`boomi_data_integration_environment` — verified (create → read → destroy).** Confirmed against
   `api.integration.rivery.in` with an account-admin token. This exposed and fixed
   a read-mapping bug: the API returns the id/name under `cross_id`/`_id` and
   `environment_name`, which the resource now normalizes (see `normalizeID`).
   Delete is a **soft-delete** server-side (`is_deleted: true`); the record remains
   readable. With an environment-scoped (non-admin) token, create returns a clear
   `403 insufficient permissions` diagnostic.
-- **`boomi_connection` — verified (create → read → destroy, idempotent).**
+- **`boomi_data_integration_connection` — verified (create → read → destroy, idempotent).**
   Confirmed live with a `redshift` connection. Two fixes were required: the
   create/update body must use `connection_name`/`connection_type` (not the generic
   `name`/`type`), and the read response maps `connection_name`/`connection_type_id`
   via `normalizeID`. Connection writes are environment-scoped — the token must hold
   the right role on the target `environment_id`.
 
-- **`boomi_dataframe` — verified (create → read → destroy, idempotent).**
+- **`boomi_data_integration_dataframe` — verified (create → read → destroy, idempotent).**
   Confirmed live referencing an existing S3 connection. Dataframes are
   environment-scoped and keyed by **name** (no cross_id), so the resource uses
   the name as its id; `connection_settings` is a typed nested block that
-  cross-references a `boomi_connection`. Delete is a hard delete (GET → 404),
+  cross-references a `boomi_data_integration_connection`. Delete is a hard delete (GET → 404),
   unlike the environment soft-delete.
 
-- **`boomi_variable` — verified (create → read → in-place update → destroy, idempotent).**
+- **`boomi_data_integration_variable` — verified (create → read → in-place update → destroy, idempotent).**
   Confirmed live against env `5ffeb0…`. Variables are an environment-scoped
   key/value collection; each key is its own resource and writes merge (sibling
   keys untouched). Requires a token with explicit `variables:list`/`variables:edit`
   scopes — a `role:admin`-only env grant returns `403`.
 
-- **`boomi_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC river.**
+- **`boomi_data_integration_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC river.**
   Manages a CDC river's source offset (mysql binlog / pg+mssql lsn / mongo resume
   token / oracle scn) via `config_json`. Create/update (single `POST`) and delete
   (`DELETE`) verified live against a real river; the offset GET validates CDC-only,
@@ -131,5 +131,5 @@ hints). Programmatic callers can branch via `errors.Is(err, client.ErrUnauthoriz
   a generated client layer is the next structural step.
 - **Auth TTL/refresh** for unattended `apply` — bearer token works; refresh is
   the open question carried from the epic.
-- Additional resources (`boomi_dataframe`, `boomi_variable`, …) extend the
+- Additional resources (`boomi_data_integration_dataframe`, `boomi_data_integration_variable`, …) extend the
   same client + resource pattern.

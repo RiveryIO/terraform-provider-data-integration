@@ -12,7 +12,7 @@ through standard Terraform workflows.
 
 > The customer-facing term is **data flow**; the underlying API path is
 > `/rivers`. The provider's public surface uses Data Integration terminology
-> (`boomi_data_flow`).
+> (`boomi_data_integration_data_flow`).
 
 ## Example Usage
 
@@ -29,7 +29,7 @@ provider "boomi" {
   # Prefer environment variables for credentials (see below).
 }
 
-resource "boomi_environment" "prod" {
+resource "boomi_data_integration_environment" "prod" {
   name = "production"
 }
 ```
@@ -48,7 +48,7 @@ variable; the attribute wins when both are set.
 | `environment_id` | `DATA_INTEGRATION_ENVIRONMENT_ID` | no       | —                       |
 
 `environment_id` sets a default environment for environment-scoped resources
-(`boomi_connection`, `boomi_data_flow`) that do not declare their own.
+(`boomi_data_integration_connection`, `boomi_data_integration_data_flow`) that do not declare their own.
 
 ## Schema
 
