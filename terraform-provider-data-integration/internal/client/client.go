@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -34,13 +35,12 @@ const (
 // writeForbiddenFields are stripped before every write — the API rejects them
 // as extra_forbidden. Lifted verbatim from the POC / BDI client.
 var writeForbiddenFields = map[string]struct{}{
-	"title":            {},
-	"id":               {},
-	"cross_id":         {},
-	"_id":              {},
-	"account_id":       {},
-	"environment_name": {},
-	"group_name":       {},
+	"title":      {},
+	"id":         {},
+	"cross_id":   {},
+	"_id":        {},
+	"account_id": {},
+	"group_name": {},
 }
 
 // APIError is the base error carrying the HTTP status and server detail.
@@ -132,6 +132,16 @@ func New(cfg Config) (*Client, error) {
 	hc := cfg.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultTimeout}
+	}
+	// Wrap the transport with request/response logging when DATA_INTEGRATION_DEBUG=1.
+	// This shows every HTTP round-trip — URL, body, status, and the full server
+	// response (which mirrors the MongoDB document for entity endpoints).
+	if os.Getenv("DATA_INTEGRATION_DEBUG") != "" {
+		base := hc.Transport
+		if base == nil {
+			base = http.DefaultTransport
+		}
+		hc.Transport = &logTransport{base: base}
 	}
 	retries := cfg.MaxRetries
 	if retries <= 0 {
@@ -467,6 +477,42 @@ func (c *Client) UpdateEnvironment(ctx context.Context, id string, patch map[str
 // DeleteEnvironment deletes an environment by id.
 func (c *Client) DeleteEnvironment(ctx context.Context, id string) error {
 	return c.request(ctx, http.MethodDelete, c.accountPath("/environments/"+id), nil, nil)
+}
+
+// ListEnvironments returns all environments for the account. The API may return
+// a flat JSON array or a paginated { items, next_page } envelope — both are
+// handled. Each item is normalized (environment_name → name, etc.).
+func (c *Client) ListEnvironments(ctx context.Context) ([]map[string]any, error) {
+	var raw json.RawMessage
+	if err := c.request(ctx, http.MethodGet, c.accountPath("/environments"), nil, &raw); err != nil {
+		return nil, err
+	}
+	// Try paginated envelope first ({ items: [...], next_page: ... }).
+	var envelope struct {
+		Items []map[string]any `json:"items"`
+		Data  []map[string]any `json:"data"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil && (envelope.Items != nil || envelope.Data != nil) {
+		items := envelope.Items
+		if items == nil {
+			items = envelope.Data
+		}
+		out := make([]map[string]any, 0, len(items))
+		for _, it := range items {
+			out = append(out, normalizeID(it))
+		}
+		return out, nil
+	}
+	// Fall back to flat array.
+	var arr []map[string]any
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, fmt.Errorf("unexpected environments list shape: %w", err)
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, it := range arr {
+		out = append(out, normalizeID(it))
+	}
+	return out, nil
 }
 
 // ---- Dataframes (environment-scoped, keyed by name) ------------------------

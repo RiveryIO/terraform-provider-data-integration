@@ -30,6 +30,8 @@ type environmentModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	UpdatedAt   types.String `tfsdk:"updated_at"`
+	UpdatedBy   types.String `tfsdk:"updated_by"`
 }
 
 func (r *environmentResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -53,6 +55,14 @@ func (r *environmentResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"description": schema.StringAttribute{
 				Optional:    true,
 				Description: "Free-text description.",
+			},
+			"updated_at": schema.StringAttribute{
+				Computed:    true,
+				Description: "Timestamp of the last modification, set by the API.",
+			},
+			"updated_by": schema.StringAttribute{
+				Computed:    true,
+				Description: "ID of the user who last modified this environment, set by the API.",
 			},
 		},
 	}
@@ -132,7 +142,7 @@ func (r *environmentResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	patch := map[string]any{"name": plan.Name.ValueString()}
+	patch := map[string]any{"environment_name": plan.Name.ValueString()}
 	if plan.Description.IsNull() {
 		patch["description"] = nil
 	} else {
@@ -193,5 +203,11 @@ func (r *environmentResource) apply(api map[string]any, m *environmentModel) {
 		m.Description = types.StringValue(desc)
 	} else if m.Description.IsUnknown() {
 		m.Description = types.StringNull()
+	}
+	m.UpdatedAt = types.StringValue(asString(api["updated_at"]))
+	if u := asString(api["updated_by"]); u != "" {
+		m.UpdatedBy = types.StringValue(u)
+	} else {
+		m.UpdatedBy = types.StringNull()
 	}
 }

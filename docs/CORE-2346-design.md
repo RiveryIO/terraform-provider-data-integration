@@ -68,8 +68,9 @@ API — port its load-bearing patterns into the provider's client layer:
   decoded locally (no `/users/me`).
 - **`edit` = read-modify-write**: GET current → deep-merge patch → PUT full body; lists
   (`schedulers`, `logic_steps`) are full-replace.
-- **Strip server-only fields** before write: `title,id,cross_id,_id,account_id,environment_name,group_name` (`extra_forbidden`).
-- **Normalize read shape**: list uses `river_cross_id`/`name`, detail uses `cross_id`/`name` → normalize to stable `id`/`title`.
+- **Strip server-only fields** before write: `title,id,cross_id,_id,account_id,group_name`. **Do NOT strip resource-specific name fields** (`environment_name`, `connection_name`) — the PUT endpoints for those resources expect those exact keys in the request body.
+- **Normalize read shape**: list uses `river_cross_id`/`name`, detail uses `cross_id`/`name` → normalize to stable `id`/`title`. Normalization is READ-only. Each resource's Update patch must use the API's write-side key name (e.g. `environment_name` not `name`), because normalization is never reversed before write.
+- **`or`-default pattern in API utils is a one-way street**: several API endpoints use `field = new_value or existing_value` (Python `or`), meaning sending `null` silently keeps the existing value — you cannot clear an optional field to null. Affects `description` on environments (and likely others). Provider tests for null→value→null cycles will fail against those endpoints until the API is fixed to use `if new_value is not None`.
 - **Typed errors + retry**: 401/403/404/422/429/5xx mapping; 3× backoff on 5xx.
 - **Attribution header**: `X-Boomi-Plugin: <name>/<ver> (account=…)` feeds the NR usage dashboard.
 
@@ -107,6 +108,8 @@ auto-approve).
 - **Provider:** `TF_ACC` acceptance tests (`resource.Test`) — real CRUD + `destroy` per step
   against an integration account; **idempotency** (empty plan after apply); **import verify**
   (`ImportStateVerify`); **sweepers** for cleanup. Unit tests for the client/auth layer.
+  - **Devbox target**: run acceptance tests against the local devbox API (`DATA_INTEGRATION_API_URL=http://localhost:8008`). The devbox API service runs on the same feature branch, so provider ↔ API contract mismatches surface before touching integration or production. Token: `uv run scripts/generate_token.py dev <account_id> <env_id>`.
+  - **Orphaned state**: when a test fails mid-run, the API's soft-delete leaves resources in `is_deleting=True` state, which blocks re-creation (409 on the next run). Sweepers or unique names per run (timestamp suffix) are required to avoid this. Cleaning up requires either a retry-aware DELETE loop or a direct MongoDB update (`is_deleted=True, is_deleting=False`).
 - **Module/config:** native `terraform test` (`*.tftest.hcl`) or Terratest; assert
   `terraform plan -detailed-exitcode` is clean after apply; ephemeral isolated env + unique
   names; always destroy in teardown.
@@ -144,3 +147,5 @@ auto-approve).
 4. **OpenAPI completeness** for the MVP resources (enough to generate the client?).
 5. **Registry namespace + GPG signing** ownership.
 6. **Provider ↔ API `/v1` contract policy** — versioning/compat between the two teams.
+7. **Write-key mismatch risk for each new resource** — the API uses resource-specific field names in `PUT` bodies (`environment_name`, `connection_name`, etc.) that differ from the normalized read keys. For every new resource, explicitly verify the write-side field names match the API's input schema before implementing Update. The acceptance test for "update name in place" will catch this immediately.
+8. **Optional field clearing** — any API endpoint that uses `field = new_value or existing` cannot have its optional fields cleared to null from the provider. Identify which fields on which resources have this limitation before designing the schema (Optional vs Optional+Computed).

@@ -29,23 +29,30 @@ func TestAccEnvironmentResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             checkEnvironmentDestroyed,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccEnvironmentConfig("tf-acc-env", "managed by terraform-provider-data-integration"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("boomi_environment.test", "id"),
 					resource.TestCheckResourceAttr("boomi_environment.test", "name", "tf-acc-env"),
+					dumpEnvironmentEntityCheck(t, "boomi_environment.test"),
 				),
 			},
 			{
 				ResourceName:      "boomi_environment.test",
 				ImportState:       true,
-				ImportStateVerify: true, // imported state must plan clean
+				ImportStateVerify: true,
+				// POST returns microsecond precision ("…375332"), GET returns
+				// millisecond precision ("…375000") — same instant, API quirk.
+				ImportStateVerifyIgnore: []string{"updated_at"},
 			},
 			{
 				Config: testAccEnvironmentConfig("tf-acc-env-renamed", "updated description"),
-				Check: resource.TestCheckResourceAttr(
-					"boomi_environment.test", "name", "tf-acc-env-renamed"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("boomi_environment.test", "name", "tf-acc-env-renamed"),
+					dumpEnvironmentEntityCheck(t, "boomi_environment.test"),
+				),
 			},
 		},
 	})

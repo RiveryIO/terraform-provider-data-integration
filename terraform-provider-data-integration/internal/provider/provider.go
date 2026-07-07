@@ -134,6 +134,8 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 		NewDataFrameResource,
 		NewVariableResource,
 		NewCDCConfigResource,
+		NewKeyPairResource,
+		NewRecipeResource,
 	}
 }
 
