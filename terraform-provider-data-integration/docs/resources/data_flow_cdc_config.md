@@ -1,10 +1,10 @@
 ---
-page_title: "boomi_data_flow_cdc_config Resource"
+page_title: "boomi_data_integration_data_flow_cdc_config Resource"
 description: |-
   The CDC offset configuration for a CDC data flow (river).
 ---
 
-# boomi_data_flow_cdc_config (Resource)
+# boomi_data_integration_data_flow_cdc_config (Resource)
 
 Manages the **CDC offset** for a CDC-enabled data flow (river) — the source
 position the next run resumes from. The offset shape is source-specific: MySQL
@@ -20,9 +20,9 @@ offset through this resource.
 ## Example Usage
 
 ```terraform
-resource "boomi_data_flow_cdc_config" "mysql_offset" {
-  environment_id = boomi_environment.prod.id
-  data_flow_id   = boomi_data_flow.cdc_river.id
+resource "boomi_data_integration_data_flow_cdc_config" "mysql_offset" {
+  environment_id = boomi_data_integration_environment.prod.id
+  data_flow_id   = boomi_data_integration_data_flow.cdc_river.id
 
   config_json = jsonencode({
     datasource_type = "mysql"
@@ -74,5 +74,5 @@ config_json = jsonencode({ datasource_type = "oracle", scn_offset = 123456789012
 ## Import
 
 ```shell
-terraform import boomi_data_flow_cdc_config.mysql_offset <environment_id>/<data_flow_id>
+terraform import boomi_data_integration_data_flow_cdc_config.mysql_offset <environment_id>/<data_flow_id>
 ```

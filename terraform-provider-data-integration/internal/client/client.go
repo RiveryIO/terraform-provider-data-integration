@@ -523,7 +523,7 @@ func (c *Client) DeleteCDCConfig(ctx context.Context, environmentID, riverID str
 // addressable resources. The API exposes: GET /variables (whole map),
 // PUT /variables (merge — only the keys sent are touched), and
 // DELETE /variables?variable_key=<key> (remove one). The provider models each
-// key as its own boomi_variable resource; merge semantics keep sibling keys
+// key as its own boomi_data_integration_variable resource; merge semantics keep sibling keys
 // intact, and Read filters the map for the managed key.
 
 // ListVariables returns the environment's full variable map.

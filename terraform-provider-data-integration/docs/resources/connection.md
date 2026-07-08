@@ -1,18 +1,18 @@
 ---
-page_title: "boomi_connection Resource"
+page_title: "boomi_data_integration_connection Resource"
 description: |-
   A Data Integration connection to a data source or target.
 ---
 
-# boomi_connection (Resource)
+# boomi_data_integration_connection (Resource)
 
 A Data Integration connection to a data source or target.
 
 ## Example Usage
 
 ```terraform
-resource "boomi_connection" "warehouse" {
-  environment_id = boomi_environment.prod.id
+resource "boomi_data_integration_connection" "warehouse" {
+  environment_id = boomi_data_integration_environment.prod.id
   name           = "snowflake-prod"
   type           = "snowflake"
 
@@ -55,10 +55,10 @@ re-applying works; the API is the source of truth for everything else.
 
 ```shell
 # environment-qualified
-terraform import boomi_connection.warehouse <environment_id>/<connection_id>
+terraform import boomi_data_integration_connection.warehouse <environment_id>/<connection_id>
 
 # bare id (requires provider-level environment_id)
-terraform import boomi_connection.warehouse <connection_id>
+terraform import boomi_data_integration_connection.warehouse <connection_id>
 ```
 
 After import, set `parameters_json` in configuration — it cannot be recovered
