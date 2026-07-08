@@ -137,3 +137,5 @@ the CORE-2346 epic for the run log.
 
 **Open question carried from the plan:** customer auth for unattended `apply` — bearer-token
 model exists today; confirm token TTL / refresh strategy for CI.
+
+<!-- ci: trigger Harness pipeline boomidataintegrationterraform (CORE-2346) -->
