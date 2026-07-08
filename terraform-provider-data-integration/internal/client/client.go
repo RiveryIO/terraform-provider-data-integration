@@ -551,3 +551,128 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 	suffix := "/variables?variable_key=" + url.QueryEscape(key)
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, suffix), nil, nil)
 }
+
+// ---- Data flow runs (activate + trigger) -----------------------------------
+//
+// Running a data flow is a two-step imperative action, not a CRUD resource:
+// a flow must be active before it can run. ActivateDataFlow enables it (the API
+// answers 204 when already active, or 202 with an async operation to poll via
+// GetOperation), then RunDataFlow triggers an execution and returns the run id.
+
+// ActivateDataFlow activates (enables) a data flow. Returns the async operation
+// id to poll when the API defers activation (202); an empty id means activation
+// completed synchronously (204 / already active).
+func (c *Client) ActivateDataFlow(ctx context.Context, environmentID, id string) (string, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/activate_river"), nil, &out); err != nil {
+		return "", err
+	}
+	if op, ok := out["operation_id"].(string); ok {
+		return op, nil
+	}
+	return "", nil
+}
+
+// GetOperation returns an async operation's status ("W" working, "D" done,
+// "E" error) and any error message.
+func (c *Client) GetOperation(ctx context.Context, environmentID, operationID string) (status, errMsg string, err error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/operations/"+operationID), nil, &out); err != nil {
+		return "", "", err
+	}
+	status, _ = out["status"].(string)
+	errMsg, _ = out["error_message"].(string)
+	return status, errMsg, nil
+}
+
+// RunDataFlow triggers a run of a data flow, returning the first run id and the
+// run group id from the API's { runs: [{run_id,...}], run_group_id } response.
+func (c *Client) RunDataFlow(ctx context.Context, environmentID, id string) (runID, runGroupID string, err error) {
+	var out struct {
+		Runs []struct {
+			RunID string `json:"run_id"`
+		} `json:"runs"`
+		RunGroupID string `json:"run_group_id"`
+	}
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/run"), nil, &out); err != nil {
+		return "", "", err
+	}
+	if len(out.Runs) > 0 {
+		runID = out.Runs[0].RunID
+	}
+	return runID, out.RunGroupID, nil
+}
+
+// ---- Connection types (read-only catalog + per-type schema discovery) -------
+//
+// These are account-agnostic catalog endpoints (not account/environment scoped).
+// They let a data source surface the API's own connection-type schema at plan
+// time, so new connector types and fields appear without a provider release.
+
+// ListConnectionTypes returns the connection-type catalog. The API paginates
+// ({ items, next_page, ... }) and wraps each row in a "fields" object, which
+// this unwraps to the inner connection-type record.
+func (c *Client) ListConnectionTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "connections_types", true)
+}
+
+// ListSourceTypes returns the source/datasource type catalog
+// (/v1/data_source_types) — each row { id, name, connection_type, status,
+// section_id, documentation_url, segment, ... }.
+func (c *Client) ListSourceTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "data_source_types", false)
+}
+
+// ListTargetTypes returns the target type catalog (/v1/target_types) — each row
+// { name, target_type, connection_type, logic_step_type, river_type_id, ... }.
+func (c *Client) ListTargetTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "target_types", false)
+}
+
+// listTypeCatalog paginates a top-level /v1/<endpoint> catalog. It pages by
+// incrementing index and stops on an empty page or once total_items is reached
+// (the list envelope's next_page is a string cursor, not an int, so index-based
+// termination is simpler and robust). When unwrapFields is true each row is
+// unwrapped from its { "fields": {...} } envelope (connections_types does this;
+// data_source_types / target_types return the object directly).
+func (c *Client) listTypeCatalog(ctx context.Context, endpoint string, unwrapFields bool) ([]map[string]any, error) {
+	var all []map[string]any
+	const maxPages = 100 // safety backstop against a misbehaving cursor
+	for page := 1; page <= maxPages; page++ {
+		var resp struct {
+			Items      []map[string]any `json:"items"`
+			TotalItems int              `json:"total_items"`
+		}
+		url := fmt.Sprintf("%s/v1/%s?page=%d", c.baseURL, endpoint, page)
+		if err := c.request(ctx, http.MethodGet, url, nil, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp.Items) == 0 {
+			break
+		}
+		for _, it := range resp.Items {
+			if unwrapFields {
+				if f, ok := it["fields"].(map[string]any); ok {
+					all = append(all, f)
+					continue
+				}
+			}
+			all = append(all, it)
+		}
+		if resp.TotalItems > 0 && len(all) >= resp.TotalItems {
+			break
+		}
+	}
+	return all, nil
+}
+
+// GetConnectionType returns one connection type's property schema —
+// { connection_type, connection_type_name, properties: [...] }.
+func (c *Client) GetConnectionType(ctx context.Context, connectionType string) (map[string]any, error) {
+	var out map[string]any
+	url := fmt.Sprintf("%s/v1/connections_types/%s", c.baseURL, connectionType)
+	if err := c.request(ctx, http.MethodGet, url, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
