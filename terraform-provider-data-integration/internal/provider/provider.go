@@ -142,6 +142,8 @@ func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() dataso
 	return []func() datasource.DataSource{
 		NewConnectionTypesDataSource,
 		NewConnectionTypeDataSource,
+		NewSourceTypesDataSource,
+		NewTargetTypesDataSource,
 	}
 }
 

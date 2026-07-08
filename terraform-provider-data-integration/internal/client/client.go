@@ -613,17 +613,37 @@ func (c *Client) RunDataFlow(ctx context.Context, environmentID, id string) (run
 // ({ items, next_page, ... }) and wraps each row in a "fields" object, which
 // this unwraps to the inner connection-type record.
 func (c *Client) ListConnectionTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "connections_types", true)
+}
+
+// ListSourceTypes returns the source/datasource type catalog
+// (/v1/data_source_types) — each row { id, name, connection_type, status,
+// section_id, documentation_url, segment, ... }.
+func (c *Client) ListSourceTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "data_source_types", false)
+}
+
+// ListTargetTypes returns the target type catalog (/v1/target_types) — each row
+// { name, target_type, connection_type, logic_step_type, river_type_id, ... }.
+func (c *Client) ListTargetTypes(ctx context.Context) ([]map[string]any, error) {
+	return c.listTypeCatalog(ctx, "target_types", false)
+}
+
+// listTypeCatalog paginates a top-level /v1/<endpoint> catalog. It pages by
+// incrementing index and stops on an empty page or once total_items is reached
+// (the list envelope's next_page is a string cursor, not an int, so index-based
+// termination is simpler and robust). When unwrapFields is true each row is
+// unwrapped from its { "fields": {...} } envelope (connections_types does this;
+// data_source_types / target_types return the object directly).
+func (c *Client) listTypeCatalog(ctx context.Context, endpoint string, unwrapFields bool) ([]map[string]any, error) {
 	var all []map[string]any
-	// Page by incrementing index and stop on an empty page or once total_items
-	// is reached. (The list envelope's next_page is a string cursor, not an int,
-	// so we don't rely on its type — pageless termination is simpler and robust.)
 	const maxPages = 100 // safety backstop against a misbehaving cursor
 	for page := 1; page <= maxPages; page++ {
 		var resp struct {
 			Items      []map[string]any `json:"items"`
 			TotalItems int              `json:"total_items"`
 		}
-		url := fmt.Sprintf("%s/v1/connections_types?page=%d", c.baseURL, page)
+		url := fmt.Sprintf("%s/v1/%s?page=%d", c.baseURL, endpoint, page)
 		if err := c.request(ctx, http.MethodGet, url, nil, &resp); err != nil {
 			return nil, err
 		}
@@ -631,11 +651,13 @@ func (c *Client) ListConnectionTypes(ctx context.Context) ([]map[string]any, err
 			break
 		}
 		for _, it := range resp.Items {
-			if f, ok := it["fields"].(map[string]any); ok {
-				all = append(all, f)
-			} else {
-				all = append(all, it)
+			if unwrapFields {
+				if f, ok := it["fields"].(map[string]any); ok {
+					all = append(all, f)
+					continue
+				}
 			}
+			all = append(all, it)
 		}
 		if resp.TotalItems > 0 && len(all) >= resp.TotalItems {
 			break
