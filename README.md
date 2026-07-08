@@ -133,3 +133,5 @@ hints). Programmatic callers can branch via `errors.Is(err, client.ErrUnauthoriz
   the open question carried from the epic.
 - Additional resources (`boomi_data_integration_dataframe`, `boomi_data_integration_variable`, …) extend the
   same client + resource pattern.
+
+<!-- ci-smoke: throwaway PR to exercise Bitbucket Pipelines from main (CORE-2346) -->
