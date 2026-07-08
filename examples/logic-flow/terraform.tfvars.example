@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in. Prefer the DATA_INTEGRATION_* env vars
+# for the provider credentials (api_url / api_token / account_id / environment_id);
+# only sub_river_id is strictly required here.
+
+api_url        = "http://localhost:8008"
+account_id     = "<account_id>"
+environment_id = "<existing_environment_id>"
+# api_token    = "<token>"   # better: export DATA_INTEGRATION_API_TOKEN
+
+river_name   = "TF_logic_orchestration"
+step_name    = "run-sub-river"
+sub_river_id = "<cross_id of an existing river to orchestrate>"
