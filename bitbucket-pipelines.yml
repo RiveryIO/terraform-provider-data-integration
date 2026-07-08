@@ -1,8 +1,14 @@
 # Bitbucket Pipelines for boomi-data-integration-terraform.
 #
+# Repo layout: the Terraform provider (Go module) is at the REPO ROOT
+# (go.mod, main.go, internal/, examples/, docs/). The original rivers-as-code
+# POC lives under poc/ (riverctl.py, rivery_client.py, rivers/, tests/).
+#
 # On every PR (and on main pushes), runs in parallel:
-#   - lint:  ruff check + ruff format --check (pinned 0.15.16, matches dev-agent)
-#   - test:  pytest unit tests (pure helpers, no network)
+#   - go-checks: gofmt / go vet / go build / go test ./internal/... (provider, root)
+#   - tf-fmt:  terraform fmt -check on examples/
+#   - lint:  ruff check + ruff format --check on poc/ (pinned 0.15.16, matches dev-agent)
+#   - test:  pytest unit tests under poc/tests (pure helpers, no network)
 #   - e2e-smoke: read-only `riverctl list` against integration (gated on creds)
 #
 # A full create -> update -> destroy e2e loop is available as a manual
@@ -29,21 +35,39 @@ image: python:3.11-slim
 definitions:
   caches:
     uv-cache: ~/.cache/uv
+    go-mod: /go/pkg/mod
   steps:
+    # --- Go provider (repo root: go.mod, main.go, internal/, examples/) ---
+    - step: &go-checks
+        name: Go build / vet / test + gofmt (provider)
+        image: golang:1.23
+        caches: [go-mod]
+        script:
+          - 'unformatted=$(gofmt -l .); if [ -n "$unformatted" ]; then echo "gofmt needed on:"; echo "$unformatted"; exit 1; fi'
+          - go vet ./...
+          - go build ./...
+          - go test ./internal/... -count=1
+    - step: &tf-fmt
+        name: terraform fmt (provider examples)
+        image: hashicorp/terraform:1.9
+        script:
+          - terraform fmt -check -recursive examples
+
+    # --- rivers-as-code POC (poc/) ---
     - step: &lint
         name: Lint (ruff 0.15.16)
         caches: [uv-cache]
         script:
           - pip install --quiet uv
-          - uvx ruff@0.15.16 check .
-          - uvx ruff@0.15.16 format --check .
+          - uvx ruff@0.15.16 check poc
+          - uvx ruff@0.15.16 format --check poc
 
     - step: &test
         name: Unit tests (pytest)
         caches: [uv-cache]
         script:
           - pip install --quiet uv
-          - uv run --with pytest --with requests pytest tests/ -v
+          - uv run --with pytest --with requests pytest poc/tests/ -v
 
     - step: &e2e-smoke
         name: E2E smoke (read-only list, integration)
@@ -59,7 +83,7 @@ definitions:
           - export DATA_INTEGRATION_API_URL="$API_URL"
           - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
           - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
-          - uv run riverctl.py list
+          - cd poc && uv run riverctl.py list
 
     - step: &pr-review-step
         name: AI PR Review + Risk-based Auto-Approve
@@ -92,6 +116,7 @@ definitions:
           - export DATA_INTEGRATION_API_URL="$API_URL"
           - export DATA_INTEGRATION_ACCOUNT_ID="$ACCOUNT_ID"
           - export DATA_INTEGRATION_ENVIRONMENT_ID="$ENVIRONMENT_ID"
+          - cd poc
           # unique name per build so concurrent runs don't collide
           - sed -i "s/zzz-iac-poc-logic-flow/zzz-iac-ci-${BITBUCKET_BUILD_NUMBER}/" rivers/poc_logic_flow.json
           - uv run riverctl.py apply     # create
@@ -102,6 +127,8 @@ pipelines:
   pull-requests:
     '**':
       - parallel:
+          - step: *go-checks
+          - step: *tf-fmt
           - step: *lint
           - step: *test
           - step: *e2e-smoke
@@ -109,6 +136,8 @@ pipelines:
   branches:
     main:
       - parallel:
+          - step: *go-checks
+          - step: *tf-fmt
           - step: *lint
           - step: *test
   custom:
