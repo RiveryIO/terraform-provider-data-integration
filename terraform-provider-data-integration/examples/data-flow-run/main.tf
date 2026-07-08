@@ -13,7 +13,7 @@ provider "boomi" {
 # Run an existing data flow (river) through Terraform. This models the API's
 # imperative activate_river + run actions as a resource (Terraform provider
 # Actions require Terraform >= 1.14, so a resource is the portable form).
-resource "boomi_data_flow_run" "nightly" {
+resource "boomi_data_integration_data_flow_run" "nightly" {
   data_flow_id = var.data_flow_id
 
   # Change any trigger value to fire another run on the next apply
@@ -31,5 +31,5 @@ variable "data_flow_id" {
 }
 
 output "run_id" {
-  value = boomi_data_flow_run.nightly.run_id
+  value = boomi_data_integration_data_flow_run.nightly.run_id
 }

@@ -1,4 +1,4 @@
-# boomi_data_flow_run (Resource)
+# boomi_data_integration_data_flow_run (Resource)
 
 Triggers a run of a data flow (river) on `apply` — the Terraform-native way to
 execute the underlying API's `activate_river` + `run` actions.
@@ -14,7 +14,7 @@ destroying it does **not** cancel or undo a run.
 
 ```hcl
 # Run a freshly-created source-to-target river
-resource "boomi_data_flow" "load" {
+resource "boomi_data_integration_data_flow" "load" {
   environment_id  = var.environment_id
   name            = "daily-load"
   type            = "source_to_target"
@@ -22,8 +22,8 @@ resource "boomi_data_flow" "load" {
   # ...
 }
 
-resource "boomi_data_flow_run" "load" {
-  data_flow_id = boomi_data_flow.load.id
+resource "boomi_data_integration_data_flow_run" "load" {
+  data_flow_id = boomi_data_integration_data_flow.load.id
   triggers = {
     ts = timestamp() # run on every apply
   }
