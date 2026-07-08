@@ -29,6 +29,7 @@ image: python:3.11-slim
 definitions:
   caches:
     uv-cache: ~/.cache/uv
+    go-mod: /go/pkg/mod
   steps:
     - step: &lint
         name: Lint (ruff 0.15.16)
@@ -44,6 +45,23 @@ definitions:
         script:
           - pip install --quiet uv
           - uv run --with pytest --with requests pytest tests/ -v
+
+    # --- Go provider (terraform-provider-data-integration/) ---
+    - step: &go-checks
+        name: Go build / vet / test + gofmt (provider)
+        image: golang:1.23
+        caches: [go-mod]
+        script:
+          - cd terraform-provider-data-integration
+          - 'unformatted=$(gofmt -l .); if [ -n "$unformatted" ]; then echo "gofmt needed on:"; echo "$unformatted"; exit 1; fi'
+          - go vet ./...
+          - go build ./...
+          - go test ./internal/... -count=1
+    - step: &tf-fmt
+        name: terraform fmt (provider examples)
+        image: hashicorp/terraform:1.9
+        script:
+          - terraform fmt -check -recursive terraform-provider-data-integration/examples
 
     - step: &e2e-smoke
         name: E2E smoke (read-only list, integration)
@@ -102,6 +120,8 @@ pipelines:
   pull-requests:
     '**':
       - parallel:
+          - step: *go-checks
+          - step: *tf-fmt
           - step: *lint
           - step: *test
           - step: *e2e-smoke
@@ -109,6 +129,8 @@ pipelines:
   branches:
     main:
       - parallel:
+          - step: *go-checks
+          - step: *tf-fmt
           - step: *lint
           - step: *test
   custom:
