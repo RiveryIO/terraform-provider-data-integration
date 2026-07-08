@@ -116,7 +116,7 @@
       "partition_granularity": null,
       "distribution_method": null
     },
-    "table_name": "romi",
+    "table_name": "exchange_rates",
     "target_prefix": null,
     "is_ordered_merge_key": null,
     "order_expression": null,
