@@ -84,6 +84,7 @@ locals {
     is_enabled     = true
     disable_errors = false
     target_settings = {
+      target_type   = "table" # discriminator the API requires on the target union
       database_name = var.sf_target_database
       schema_name   = var.sf_target_schema
       table_name    = var.sf_target_table

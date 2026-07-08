@@ -21,7 +21,7 @@ config emits the exact step shapes the API accepts:
       { "type": "river", "river_id": "<cross_id>", "input_variables": {} },
       { "type": "logicode", "code_type": "python", "file_id": "<file_id>", "logicode_size": "XS", "additional_packages": [] },
       { "type": "snowflake_sql_query", "connection_id": "<conn>", "sql_query": "...",
-        "target_settings": { "database_name": "...", "schema_name": "...", "table_name": "...", "loading_mode": "overwrite" } }
+        "target_settings": { "target_type": "table", "database_name": "...", "schema_name": "...", "table_name": "...", "loading_mode": "overwrite" } }
     ]
   }]
 }
