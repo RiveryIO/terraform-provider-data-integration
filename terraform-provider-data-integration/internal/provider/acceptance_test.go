@@ -33,19 +33,19 @@ func TestAccEnvironmentResource(t *testing.T) {
 			{
 				Config: testAccEnvironmentConfig("tf-acc-env", "managed by terraform-provider-data-integration"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("boomi_environment.test", "id"),
-					resource.TestCheckResourceAttr("boomi_environment.test", "name", "tf-acc-env"),
+					resource.TestCheckResourceAttrSet("boomi_data_integration_environment.test", "id"),
+					resource.TestCheckResourceAttr("boomi_data_integration_environment.test", "name", "tf-acc-env"),
 				),
 			},
 			{
-				ResourceName:      "boomi_environment.test",
+				ResourceName:      "boomi_data_integration_environment.test",
 				ImportState:       true,
 				ImportStateVerify: true, // imported state must plan clean
 			},
 			{
 				Config: testAccEnvironmentConfig("tf-acc-env-renamed", "updated description"),
 				Check: resource.TestCheckResourceAttr(
-					"boomi_environment.test", "name", "tf-acc-env-renamed"),
+					"boomi_data_integration_environment.test", "name", "tf-acc-env-renamed"),
 			},
 		},
 	})
@@ -66,13 +66,13 @@ func TestAccDataFlowResource(t *testing.T) {
 			{
 				Config: testAccDataFlowConfig("tf-acc-flow", "first", subRiverID),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("boomi_data_flow.test", "id"),
-					resource.TestCheckResourceAttr("boomi_data_flow.test", "name", "tf-acc-flow"),
-					resource.TestCheckResourceAttr("boomi_data_flow.test", "description", "first"),
+					resource.TestCheckResourceAttrSet("boomi_data_integration_data_flow.test", "id"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow.test", "name", "tf-acc-flow"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow.test", "description", "first"),
 				),
 			},
 			{
-				ResourceName:      "boomi_data_flow.test",
+				ResourceName:      "boomi_data_integration_data_flow.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
@@ -87,7 +87,7 @@ func TestAccDataFlowResource(t *testing.T) {
 			{
 				Config: testAccDataFlowConfig("tf-acc-flow", "second", subRiverID),
 				Check: resource.TestCheckResourceAttr(
-					"boomi_data_flow.test", "description", "second"),
+					"boomi_data_integration_data_flow.test", "description", "second"),
 			},
 		},
 	})
@@ -109,13 +109,13 @@ func TestAccDataFrameResource(t *testing.T) {
 			{
 				Config: testAccDataFrameConfig("tf-acc-df", connID, "rivery-dev-tests"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("boomi_dataframe.test", "id", "tf-acc-df"),
-					resource.TestCheckResourceAttr("boomi_dataframe.test", "name", "tf-acc-df"),
-					resource.TestCheckResourceAttr("boomi_dataframe.test", "connection_settings.connection", connID),
+					resource.TestCheckResourceAttr("boomi_data_integration_dataframe.test", "id", "tf-acc-df"),
+					resource.TestCheckResourceAttr("boomi_data_integration_dataframe.test", "name", "tf-acc-df"),
+					resource.TestCheckResourceAttr("boomi_data_integration_dataframe.test", "connection_settings.connection", connID),
 				),
 			},
 			{
-				ResourceName:      "boomi_dataframe.test",
+				ResourceName:      "boomi_data_integration_dataframe.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
@@ -127,7 +127,7 @@ func TestAccDataFrameResource(t *testing.T) {
 			{
 				Config: testAccDataFrameConfig("tf-acc-df", connID, "rivery-dev-tests-2"),
 				Check: resource.TestCheckResourceAttr(
-					"boomi_dataframe.test", "connection_settings.default_bucket", "rivery-dev-tests-2"),
+					"boomi_data_integration_dataframe.test", "connection_settings.default_bucket", "rivery-dev-tests-2"),
 			},
 		},
 	})
@@ -144,19 +144,19 @@ func TestAccVariableResource(t *testing.T) {
 			{
 				Config: testAccVariableConfig("tf_acc_var", "first"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("boomi_variable.test", "id", "tf_acc_var"),
-					resource.TestCheckResourceAttr("boomi_variable.test", "key", "tf_acc_var"),
-					resource.TestCheckResourceAttr("boomi_variable.test", "value", "first"),
+					resource.TestCheckResourceAttr("boomi_data_integration_variable.test", "id", "tf_acc_var"),
+					resource.TestCheckResourceAttr("boomi_data_integration_variable.test", "key", "tf_acc_var"),
+					resource.TestCheckResourceAttr("boomi_data_integration_variable.test", "value", "first"),
 				),
 			},
 			{
-				ResourceName:      "boomi_variable.test",
+				ResourceName:      "boomi_data_integration_variable.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
 			{
 				Config: testAccVariableConfig("tf_acc_var", "second"),
-				Check:  resource.TestCheckResourceAttr("boomi_variable.test", "value", "second"),
+				Check:  resource.TestCheckResourceAttr("boomi_data_integration_variable.test", "value", "second"),
 			},
 		},
 	})
@@ -166,7 +166,7 @@ func testAccVariableConfig(key, value string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
-resource "boomi_variable" "test" {
+resource "boomi_data_integration_variable" "test" {
   key   = %q
   value = %q
 }
@@ -189,13 +189,13 @@ func TestAccCDCConfigResource(t *testing.T) {
 			{
 				Config: testAccCDCConfigConfig(riverID, "515820321"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("boomi_data_flow_cdc_config.test", "id", riverID),
-					resource.TestCheckResourceAttr("boomi_data_flow_cdc_config.test", "data_flow_id", riverID),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "id", riverID),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "data_flow_id", riverID),
 				),
 			},
 			{
 				Config: testAccCDCConfigConfig(riverID, "515820999"),
-				Check:  resource.TestCheckResourceAttrSet("boomi_data_flow_cdc_config.test", "config_json"),
+				Check:  resource.TestCheckResourceAttrSet("boomi_data_integration_data_flow_cdc_config.test", "config_json"),
 			},
 		},
 	})
@@ -205,7 +205,7 @@ func testAccCDCConfigConfig(riverID, pos string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
-resource "boomi_data_flow_cdc_config" "test" {
+resource "boomi_data_integration_data_flow_cdc_config" "test" {
   data_flow_id = %q
   config_json = jsonencode({
     datasource_type = "mysql"
@@ -220,7 +220,7 @@ func testAccEnvironmentConfig(name, desc string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
-resource "boomi_environment" "test" {
+resource "boomi_data_integration_environment" "test" {
   name        = %q
   description = %q
 }
@@ -231,7 +231,7 @@ func testAccDataFlowConfig(name, desc, subRiverID string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
-resource "boomi_data_flow" "test" {
+resource "boomi_data_integration_data_flow" "test" {
   name        = %q
   description = %q
   type        = "logic"
@@ -252,7 +252,7 @@ func testAccDataFrameConfig(name, connID, bucket string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
-resource "boomi_dataframe" "test" {
+resource "boomi_data_integration_dataframe" "test" {
   name = %q
   connection_settings = {
     connection     = %q

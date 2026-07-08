@@ -10,20 +10,20 @@ terraform {
 # or set them inline here (token is sensitive — prefer the environment).
 provider "boomi" {
   # api_url    = "https://api.rivery.io"
-  # token      = var.boomi_token
-  # account_id = var.boomi_account_id
+  # token      = var.boomi_data_integration_token
+  # account_id = var.boomi_data_integration_account_id
 }
 
 # An environment groups connections and data flows. Account-scoped.
-resource "boomi_environment" "prod" {
+resource "boomi_data_integration_environment" "prod" {
   name        = "production"
   description = "Managed by terraform-provider-data-integration"
 }
 
 # A connection lives in an environment. Credentials go in parameters_json and
 # are treated as write-only (never read back from the API).
-resource "boomi_connection" "warehouse" {
-  environment_id = boomi_environment.prod.id
+resource "boomi_data_integration_connection" "warehouse" {
+  environment_id = boomi_data_integration_environment.prod.id
   name           = "snowflake-prod"
   type           = "snowflake"
 
@@ -38,10 +38,10 @@ resource "boomi_connection" "warehouse" {
 # A data flow (the API calls this a "river"). The flow definition is supplied
 # as JSON, keeping the resource forward-compatible with the full river schema.
 # It references both the environment and the connection above.
-resource "boomi_data_flow" "daily_load" {
-  environment_id = boomi_environment.prod.id
+resource "boomi_data_integration_data_flow" "daily_load" {
+  environment_id = boomi_data_integration_environment.prod.id
   name           = "daily-warehouse-load"
-  description    = "Loads the daily batch into ${boomi_connection.warehouse.name}"
+  description    = "Loads the daily batch into ${boomi_data_integration_connection.warehouse.name}"
   type           = "logic"
 
   properties_json = jsonencode({
@@ -70,9 +70,9 @@ variable "sub_river_id" {
 }
 
 output "environment_id" {
-  value = boomi_environment.prod.id
+  value = boomi_data_integration_environment.prod.id
 }
 
 output "data_flow_id" {
-  value = boomi_data_flow.daily_load.id
+  value = boomi_data_integration_data_flow.daily_load.id
 }

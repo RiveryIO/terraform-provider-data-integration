@@ -1,8 +1,11 @@
 // Package provider implements the Boomi Data Integration Terraform provider.
 //
-// The public surface uses Data Integration terminology — the provider is
-// "boomi", resources are boomi_data_flow /
-// boomi_connection / boomi_environment — even though the
+// The public surface uses Data Integration terminology — the provider type
+// name (resource prefix) is "boomi_data_integration", so resources are
+// boomi_data_integration_data_flow / boomi_data_integration_connection /
+// boomi_data_integration_environment. The provider's HCL local name stays
+// "boomi" (Terraform forbids underscores in provider local names, and infers
+// the provider from the first segment of the resource type) — even though the
 // underlying API speaks "river".
 package provider
 
@@ -46,7 +49,7 @@ func New(version string) func() provider.Provider {
 }
 
 func (p *dataIntegrationProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
-	resp.TypeName = "boomi"
+	resp.TypeName = "boomi_data_integration"
 	resp.Version = p.version
 }
 

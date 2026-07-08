@@ -1,22 +1,22 @@
 ---
-page_title: "boomi_variable Resource"
+page_title: "boomi_data_integration_variable Resource"
 description: |-
   A Data Integration environment variable (key/value), keyed by name.
 ---
 
-# boomi_variable (Resource)
+# boomi_data_integration_variable (Resource)
 
 A Data Integration environment variable. Variables are an environment-scoped
-key/value collection; each key is managed as its own `boomi_variable` resource.
+key/value collection; each key is managed as its own `boomi_data_integration_variable` resource.
 Writes **merge** at the API level, so managing one key never disturbs sibling
-keys, and multiple `boomi_variable` resources can target the same environment
+keys, and multiple `boomi_data_integration_variable` resources can target the same environment
 safely.
 
 ## Example Usage
 
 ```terraform
-resource "boomi_variable" "region" {
-  environment_id = boomi_environment.prod.id
+resource "boomi_data_integration_variable" "region" {
+  environment_id = boomi_data_integration_environment.prod.id
   key            = "default_region"
   value          = "us-east-1"
 }
@@ -50,8 +50,8 @@ for the target environment, or the API returns `403 insufficient permissions`.
 
 ```shell
 # environment-qualified
-terraform import boomi_variable.region <environment_id>/<key>
+terraform import boomi_data_integration_variable.region <environment_id>/<key>
 
 # bare key (requires provider-level environment_id)
-terraform import boomi_variable.region <key>
+terraform import boomi_data_integration_variable.region <key>
 ```

@@ -77,7 +77,7 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Attributes: map[string]schema.Attribute{
 					"connection": schema.StringAttribute{
 						Required:    true,
-						Description: "ID of the storage connection (cross-reference a boomi_connection).",
+						Description: "ID of the storage connection (cross-reference a boomi_data_integration_connection).",
 					},
 					"datasource_id": schema.StringAttribute{
 						Required:    true,
