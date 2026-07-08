@@ -1,0 +1,226 @@
+{
+  "properties_type": "source_to_target",
+  "source": {
+    "name": "ecb",
+    "connection_id": null,
+    "connection_name": "ecb",
+    "run_type": "regular",
+    "cdc_settings": null,
+    "additional_settings": {
+      "connection_type": "false",
+      "to_currency": [
+        "USD"
+      ],
+      "utc_offset": "+2",
+      "end_date": null,
+      "quote": "\"",
+      "required_mapping_flag": false,
+      "fz_partition": "d",
+      "delimiter": ",",
+      "fz_batched": true,
+      "fz_path": "example_s2t_bigquery",
+      "from_currency": [
+        "ILS"
+      ],
+      "time_period": "yesterday",
+      "gzipTypeMust": null,
+      "source_format": "NEWLINE_DELIMITED_JSON",
+      "start_date": "2026-07-06 23:59:59.999000"
+    }
+  },
+  "target": {
+    "name": "bigquery",
+    "connection_id": null,
+    "connection_name": "your-bigquery-connection",
+    "single_table_settings": {
+      "escape_character": null,
+      "match_keys": null,
+      "mapping": [
+        {
+          "name": "frequency",
+          "type": "STRING",
+          "fieldName": "frequency",
+          "id": "frequency",
+          "fields": []
+        },
+        {
+          "name": "from_currency",
+          "type": "STRING",
+          "fieldName": "from_currency",
+          "id": "from_currency",
+          "fields": []
+        },
+        {
+          "name": "to_currency",
+          "type": "STRING",
+          "fieldName": "to_currency",
+          "id": "to_currency",
+          "fields": []
+        },
+        {
+          "name": "date",
+          "type": "TIMESTAMP",
+          "fieldName": "date",
+          "dateFormat": "yyyy-mm-dd HH:MM:SS",
+          "id": "date",
+          "fields": []
+        },
+        {
+          "name": "time_format",
+          "type": "STRING",
+          "fieldName": "time_format",
+          "id": "time_format",
+          "fields": []
+        },
+        {
+          "name": "rate_unit",
+          "type": "STRING",
+          "fieldName": "rate_unit",
+          "id": "rate_unit",
+          "fields": []
+        },
+        {
+          "name": "rate",
+          "type": "FLOAT",
+          "fieldName": "rate",
+          "id": "rate",
+          "fields": []
+        },
+        {
+          "name": "title",
+          "type": "STRING",
+          "fieldName": "title",
+          "id": "title",
+          "fields": []
+        },
+        {
+          "name": "from_currency_name",
+          "type": "STRING",
+          "fieldName": "from_currency_name",
+          "id": "from_currency_name",
+          "fields": []
+        },
+        {
+          "name": "to_currency_name",
+          "type": "STRING",
+          "fieldName": "to_currency_name",
+          "id": "to_currency_name",
+          "fields": []
+        }
+      ],
+      "sql_dialect": "standard",
+      "split_tables": "no",
+      "split_data": null,
+      "split_interval": null,
+      "partition_type": null,
+      "partition_granularity": null,
+      "distribution_method": null
+    },
+    "table_name": "romi",
+    "target_prefix": null,
+    "is_ordered_merge_key": null,
+    "order_expression": null,
+    "loading_method": "overwrite",
+    "merge_method": null,
+    "file_zone_settings": {
+      "path": "example_s2t_bigquery",
+      "bucket_name": "",
+      "partitioned_kind": "by_day",
+      "fz_loading_mode": "auto-period"
+    },
+    "file_path_destination": null,
+    "additional_settings": {
+      "allow_jagged_rows": true,
+      "sync_schema_back": false,
+      "compression": false,
+      "ignore_unknown_values": true,
+      "quote": "\"",
+      "source_format": "NEWLINE_DELIMITED_JSON",
+      "csvTypeMust": "json",
+      "header": 1,
+      "delimiter": ",",
+      "fz_batched": true,
+      "fz_path": "example_s2t_bigquery",
+      "max_bad_records": 0,
+      "allow_quoted_new_line": true,
+      "mapping_order": [],
+      "source_mapping": [
+        {
+          "fieldName": "frequency",
+          "length": 1,
+          "type": "STRING",
+          "name": "frequency",
+          "fields": []
+        },
+        {
+          "fieldName": "from_currency",
+          "length": 4,
+          "type": "STRING",
+          "name": "from_currency",
+          "fields": []
+        },
+        {
+          "fieldName": "to_currency",
+          "length": 4,
+          "type": "STRING",
+          "name": "to_currency",
+          "fields": []
+        },
+        {
+          "name": "date",
+          "dateFormat": "yyyy-mm-dd HH:MM:SS",
+          "fields": [],
+          "time_format": "%Y-%m-%dT%H:%M:%S",
+          "fieldName": "date",
+          "type": "TIMESTAMP"
+        },
+        {
+          "fieldName": "time_format",
+          "length": 4,
+          "type": "STRING",
+          "name": "time_format",
+          "fields": []
+        },
+        {
+          "fieldName": "rate_unit",
+          "length": 4,
+          "type": "STRING",
+          "name": "rate_unit",
+          "fields": []
+        },
+        {
+          "fieldName": "rate",
+          "type": "FLOAT",
+          "name": "rate",
+          "fields": []
+        },
+        {
+          "fieldName": "title",
+          "length": 32,
+          "type": "STRING",
+          "name": "title",
+          "fields": []
+        },
+        {
+          "fieldName": "from_currency_name",
+          "length": 16,
+          "type": "STRING",
+          "name": "from_currency_name",
+          "fields": []
+        },
+        {
+          "fieldName": "to_currency_name",
+          "length": 16,
+          "type": "STRING",
+          "name": "to_currency_name",
+          "fields": []
+        }
+      ],
+      "start_date": 1783425176797
+    },
+    "dataset_id": "REPLACED_BY_VAR",
+    "sql_dialect": "standard",
+    "auto_detect_datatype_changes": null
+  },
+  "schemas": []
+}
