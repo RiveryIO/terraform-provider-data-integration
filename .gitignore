@@ -49,8 +49,24 @@ Thumbs.db
 *.wmv
 
 
-# rivers-as-code POC
+# rivers-as-code POC (poc/)
 .state/
 *.env
 .venv/
 __pycache__/
+
+# Terraform provider build output
+/bin/
+terraform-provider-rivery
+terraform-provider-data-integration
+
+# Local terraform state / plugin cache from examples
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Local CLI config / dev overrides
+*.tfrc

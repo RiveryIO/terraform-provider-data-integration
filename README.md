@@ -1,139 +1,135 @@
-# boomi-data-integration-terraform
+# terraform-provider-data-integration
 
-Infrastructure-/config-as-code for Boomi **Data Integration** (Rivery) data flows.
+Terraform provider for **Boomi Data Integration** (Rivery). Declare environments,
+connections, and data flows in `.tf`, plan the diff, and apply through the Data
+Integration API.
 
-Tracks Jira epic **CORE-2346 — Terraform Provider for Data Integration**. This repo
-currently holds a **validation POC** (`riverctl`, a "rivers-as-code" loop) that proves the
-read-modify-write reconcile cycle against the Rivery public API end-to-end, plus the design
-note comparing the approach to the full Terraform-provider plan. The Go provider itself is
-the next phase (see Roadmap).
+Tracks Jira epic **CORE-2346**. This is the MVP provider phase that follows the
+`riverctl` POC, now kept under `poc/` — see `poc/README.md` and
+`poc/design/CORE-2346-design.md`.
 
-> Customer-facing term is **data flow**; the API/code term is **river**. Both refer to the
-> same object — the API paths and fields use `river`/`cross_id`.
+> The customer-facing term is **data flow**; the underlying API path is
+> `/rivers`. The public surface uses Data Integration terminology
+> (`boomi_data_integration_data_flow`).
 
-## What's here
+## Resources
+
+| Resource             | Scope     | API path        | CRUD | Import |
+|----------------------|-----------|-----------------|------|--------|
+| `boomi_data_integration_environment` | account   | `/environments` | ✅    | ✅ `<id>` |
+| `boomi_data_integration_connection`  | env       | `/connections`  | ✅    | ✅ `<env_id>/<id>` |
+| `boomi_data_integration_data_flow`   | env       | `/rivers`       | ✅    | ✅ `<env_id>/<id>` |
+
+All resources support `import`, drift detection via `Read`, and force-replace on
+immutable fields (`environment_id`, connection `type`).
+
+## Layout
 
 ```
-riverctl.py                  CLI: plan / apply / destroy / list
-rivery_client.py             slim Rivery public-API client (ports BDI plugin patterns)
-rivers/*.json                desired state — one data flow per file (git-managed)
-.state/state.json            actual state: name -> {cross_id, last_applied_hash}  (gitignored)
-docs/CORE-2346-comparison.md design note: this POC vs. the full TF-provider plan
+main.go                              provider entrypoint (registry addr boomi/data-integration)
+internal/client/                     Data Integration API client (Go port of poc/rivery_client.py)
+internal/provider/                   provider + resource implementations
+examples/                            runnable example configuration
+docs/                                Terraform Registry documentation
+.goreleaser.yml                      signed multi-platform release build
 ```
 
-The loop:
+## Authentication
 
-```
-rivers/*.json  (desired)  ──►  riverctl  ──►  Rivery public API  (actual)
-                                  ▲
-                          .state/state.json
-```
+Credentials resolve from provider attributes or environment variables (attribute
+wins): `token` / `DATA_INTEGRATION_API_TOKEN`, `account_id` /
+`DATA_INTEGRATION_ACCOUNT_ID`, `api_url` / `DATA_INTEGRATION_API_URL` (default
+`https://api.rivery.io`), `environment_id` / `DATA_INTEGRATION_ENVIRONMENT_ID`
+(default environment for env-scoped resources).
 
-`.state/` is the **state backend** stand-in (local temp folder). For a real deployment,
-state should move to object storage (e.g. S3) with locking — **not** git (git state has
-concurrency + secret-leak problems). Desired state (`rivers/`) is what belongs in git.
-
-## Prerequisites
-
-- [`uv`](https://docs.astral.sh/uv/) (the tool declares its deps inline via PEP 723 — no venv setup needed).
-- A Rivery API token + account id + environment id for the target environment.
-
-## Credentials (never committed)
-
-`*.env` and `.state/` are gitignored. Provide credentials one of two ways:
-
-**A. Point at an env file** (KEY=VALUE) with the api-service integration keys:
+## Develop
 
 ```bash
-export RIVERY_IAC_ENV_FILE=/path/to/integration.local.env
-# file must contain: CLI_TOKEN=...  API_URL=...  ACCOUNT_ID=...  ENVIRONMENT_ID=...
+make build       # build ./bin/terraform-provider-data-integration
+make test        # unit tests (acceptance tests auto-skip without TF_ACC)
+make fmt vet     # format + vet
 ```
 
-**B. Export the standard env vars directly:**
+To try the provider against the examples without publishing, use a dev override:
 
 ```bash
-export DATA_INTEGRATION_API_TOKEN=...
-export DATA_INTEGRATION_API_URL=https://api.integration.rivery.in
-export DATA_INTEGRATION_ACCOUNT_ID=...
-export DATA_INTEGRATION_ENVIRONMENT_ID=...
-```
-
-Optional: `RIVERY_IAC_STATE_DIR` to relocate the state file (default `./.state`).
-
-## Usage
-
-```bash
-uv run riverctl.py list      # read-only smoke test — list rivers in the target account/env
-uv run riverctl.py plan      # show CREATE / UPDATE / NO-OP / DESTROY for each rivers/*.json
-uv run riverctl.py apply     # reconcile: create new, deep-merge-update changed; writes state
-uv run riverctl.py destroy   # delete every river tracked in state; clears state
-```
-
-Typical flow:
-
-```bash
-export RIVERY_IAC_ENV_FILE=~/Documents/Dev/rivery-api-service/integration.local.env
-uv run riverctl.py apply     # create the data flow(s) in rivers/
-# edit rivers/poc_logic_flow.json (e.g. the description)
-uv run riverctl.py plan      # -> ~ UPDATE
-uv run riverctl.py apply     # applies the read-modify-write update
-uv run riverctl.py destroy   # clean up
-```
-
-## Authoring a data flow
-
-One JSON file per flow in `rivers/`. The `name` field is the logical key used in state.
-Minimal **logic** flow (validated against integration):
-
-```json
-{
-  "kind": "main_river",
-  "type": "logic",
-  "name": "my-flow",
-  "metadata": { "description": "..." },
-  "settings": {},
-  "properties": {
-    "properties_type": "logic",
-    "logic_steps": [
-      { "type": "river", "name": "step-1", "river_id": "<cross_id>", "input_variables": {} }
-    ]
-  }
+cat > dev.tfrc <<EOF
+provider_installation {
+  dev_overrides { "boomi/data-integration" = "$(pwd)/bin" }
+  direct {}
 }
+EOF
+make build
+cd examples && TF_CLI_CONFIG_FILE=../dev.tfrc terraform plan
 ```
 
-### Schema gotchas (learned validating against the live API — CORE-2346 inputs)
+## Acceptance tests
 
-- **Read shape ≠ write shape.** GET returns `properties.logic_steps`; CREATE/UPDATE expect
-  `properties.logic_steps` under a `properties_type`-discriminated object. The client
-  normalizes reads to stable `id`/`title`; the provider's `Read` must do the same or plans
-  stay perpetually dirty.
-- **`metadata` + `settings` objects are required on write** (their inner fields default).
-  `description` lives in `metadata.description` — a **top-level** `description` is rejected
-  (`extra_forbidden`).
-- **`logic_steps` must have ≥ 1 item.** A leaf `river`-type step needs a real `river_id`.
-- **Writes reject server-only fields** — the client strips
-  `title,id,cross_id,_id,account_id,environment_name,group_name` before POST/PUT.
-- **`edit` is read-modify-write** — GET current, deep-merge the patch, PUT the full body.
-  Lists (`schedulers`, `logic_steps`) are full-replace, not index-merged.
-- **List is paginated** — `{ items, next_page, total_items, ... }`, not a bare array.
+Acceptance tests perform real CRUD + `destroy` per step and assert idempotency
+and import-clean state. They run only with `TF_ACC=1` and live integration
+credentials:
 
-## Validation status (integration)
+```bash
+export DATA_INTEGRATION_API_TOKEN=... DATA_INTEGRATION_ACCOUNT_ID=... \
+       DATA_INTEGRATION_ENVIRONMENT_ID=... RIVERY_ACC_SUBRIVER_ID=<a real river cross_id>
+make testacc
+```
 
-Full loop exercised against `api.integration.rivery.in`: `list` → `apply`(create) →
-`apply`(no-op) → edit → `apply`(update, server-verified) → `destroy`(404-confirmed). See
-the CORE-2346 epic for the run log.
+## Verification status (live integration)
 
-## Roadmap
+- **`boomi_data_integration_data_flow` — verified.** `TestAccDataFlowResource` passes against
+  `api.integration.rivery.in`: create → import-verify → update → destroy, with
+  idempotency. This confirmed the read≠write handling — the API enriches
+  `logic_steps`/`settings` on write, so `properties_json`/`settings_json` are
+  treated as **config-authoritative** (kept from config, not refreshed from the
+  API; drift inside the blob is not detected).
+- **`boomi_data_integration_environment` — verified (create → read → destroy).** Confirmed against
+  `api.integration.rivery.in` with an account-admin token. This exposed and fixed
+  a read-mapping bug: the API returns the id/name under `cross_id`/`_id` and
+  `environment_name`, which the resource now normalizes (see `normalizeID`).
+  Delete is a **soft-delete** server-side (`is_deleted: true`); the record remains
+  readable. With an environment-scoped (non-admin) token, create returns a clear
+  `403 insufficient permissions` diagnostic.
+- **`boomi_data_integration_connection` — verified (create → read → destroy, idempotent).**
+  Confirmed live with a `redshift` connection. Two fixes were required: the
+  create/update body must use `connection_name`/`connection_type` (not the generic
+  `name`/`type`), and the read response maps `connection_name`/`connection_type_id`
+  via `normalizeID`. Connection writes are environment-scoped — the token must hold
+  the right role on the target `environment_id`.
 
-1. **POC:** `riverctl` rivers-as-code loop + design note. ✅
-2. **State backend:** move `.state/` to S3 (+locking); keep `rivers/` in git.
-3. **Terraform provider — MVP:** `terraform-provider-data-integration/` (Go + terraform-plugin-framework),
-   client ported from `rivery_client.py`; resources `boomi_environment` → `boomi_connection`
-   → `boomi_data_flow` with full CRUD + `import`; unit tests + `TF_ACC` acceptance tests +
-   examples + Registry docs. ✅ (`boomi_data_flow` verified live against integration; see
-   `terraform-provider-data-integration/README.md`). See `docs/CORE-2346-comparison.md`.
-4. **Provider — next:** generate the client from the public OpenAPI; add
-   `rivery_dataframe` / `rivery_variable`; resolve auth TTL/refresh; GoReleaser → Registry publish.
+- **`boomi_data_integration_dataframe` — verified (create → read → destroy, idempotent).**
+  Confirmed live referencing an existing S3 connection. Dataframes are
+  environment-scoped and keyed by **name** (no cross_id), so the resource uses
+  the name as its id; `connection_settings` is a typed nested block that
+  cross-references a `boomi_data_integration_connection`. Delete is a hard delete (GET → 404),
+  unlike the environment soft-delete.
 
-**Open question carried from the plan:** customer auth for unattended `apply` — bearer-token
-model exists today; confirm token TTL / refresh strategy for CI.
+- **`boomi_data_integration_variable` — verified (create → read → in-place update → destroy, idempotent).**
+  Confirmed live against env `5ffeb0…`. Variables are an environment-scoped
+  key/value collection; each key is its own resource and writes merge (sibling
+  keys untouched). Requires a token with explicit `variables:list`/`variables:edit`
+  scopes — a `role:admin`-only env grant returns `403`.
+
+- **`boomi_data_integration_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC river.**
+  Manages a CDC river's source offset (mysql binlog / pg+mssql lsn / mongo resume
+  token / oracle scn) via `config_json`. Create/update (single `POST`) and delete
+  (`DELETE`) verified live against a real river; the offset GET validates CDC-only,
+  so a genuinely CDC-enabled river is needed to exercise reads. Config-authoritative
+  (the offset advances at runtime; not drift-reconciled) — intended to seed/reset.
+
+### Auth error reporting
+
+`401` and `403` responses surface as actionable Terraform diagnostics (distinct
+"authentication failed" vs "insufficient permissions" messages with remediation
+hints). Programmatic callers can branch via `errors.Is(err, client.ErrUnauthorized)`,
+`client.ErrForbidden`, or the umbrella `client.ErrAuth`.
+
+## Known gaps / next steps
+
+- **Generated client** — the design note targets generating the client from the
+  public OpenAPI spec. This MVP hand-writes the client and resources; swapping in
+  a generated client layer is the next structural step.
+- **Auth TTL/refresh** for unattended `apply` — bearer token works; refresh is
+  the open question carried from the epic.
+- Additional resources (`boomi_data_integration_dataframe`, `boomi_data_integration_variable`, …) extend the
+  same client + resource pattern.
