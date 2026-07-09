@@ -70,3 +70,7 @@ crash.*.log
 
 # Local CLI config / dev overrides
 *.tfrc
+
+# Real variable values (may contain credentials) — keep only *.tfvars.example
+*.tfvars
+!*.tfvars.example

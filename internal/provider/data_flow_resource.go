@@ -40,6 +40,7 @@ type dataFlowModel struct {
 	Description    types.String         `tfsdk:"description"`
 	PropertiesJSON jsontypes.Normalized `tfsdk:"properties_json"`
 	SettingsJSON   jsontypes.Normalized `tfsdk:"settings_json"`
+	GroupID        types.String         `tfsdk:"group_id"`
 }
 
 func (r *dataFlowResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -104,6 +105,16 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "The river settings object as JSON. Defaults to an empty object. " +
 					"Config-authoritative like properties_json (the API adds a notification block " +
 					"on write); the provider does not refresh it from the API.",
+			},
+			"group_id": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Group (cross_id) the data flow belongs to. Required for logic flows " +
+					"whose steps use shared warehouse connections (e.g. a Snowflake SQL step): without " +
+					"it the platform cannot route the connection through the group and the warehouse " +
+					"driver fails at run time with a misleading connection/404 error. Falls back to the " +
+					"API-assigned group when unset.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -246,6 +257,9 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, diags *diag.Diagnostics
 		"settings":   settings,
 		"properties": props,
 	}
+	if !plan.GroupID.IsNull() && !plan.GroupID.IsUnknown() && plan.GroupID.ValueString() != "" {
+		body["group_id"] = plan.GroupID.ValueString()
+	}
 	return body, true
 }
 
@@ -270,6 +284,14 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 		} else if m.Description.IsUnknown() {
 			m.Description = types.StringNull()
 		}
+	}
+
+	// group_id is a plain scalar the API echoes back; adopt the server value so a
+	// Computed (unset) group_id lands the API-assigned one without a perpetual diff.
+	if g := asString(api["group_id"]); g != "" {
+		m.GroupID = types.StringValue(g)
+	} else if m.GroupID.IsUnknown() {
+		m.GroupID = types.StringNull()
 	}
 
 	// properties_json / settings_json are config-authoritative JSON passthrough.

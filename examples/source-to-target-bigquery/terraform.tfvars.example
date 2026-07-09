@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. Prefer the DATA_INTEGRATION_*
+# env vars for the provider credentials. No secrets belong in a committed file.
+
+api_url        = "https://api.integration.rivery.in"
+account_id     = "<account_id>"
+environment_id = "<existing_environment_id>"
+group_id       = "<env_group_cross_id>"
+# api_token    = "<token>"   # better: export DATA_INTEGRATION_API_TOKEN
+
+river_name         = "TF_s2t_bigquery"
+bq_connection_name = "tf-bigquery-target"
+
+# BigQuery target (identifiers, not secrets — but keep real values out of git)
+gcp_project_id            = "<your-gcp-project>"
+gcp_service_account_email = "<sa>@<your-gcp-project>.iam.gserviceaccount.com"
+gcp_region                = "us"
+bq_dataset_id             = "<existing_dataset>"

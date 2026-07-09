@@ -55,6 +55,11 @@ resource "boomi_data_integration_data_flow" "daily_load" {
 - `description` (String) Stored under the API's `metadata.description`
   (a top-level `description` is rejected by the API).
 - `settings_json` (String) The river `settings` object as JSON. Defaults to `{}`.
+- `group_id` (String) Group (`cross_id`) the data flow belongs to. Required for
+  logic flows whose steps use shared warehouse connections (e.g. a Snowflake SQL
+  step): without it the platform cannot route the connection through the group and
+  the warehouse driver fails at run time with a misleading connection/404 error.
+  Falls back to the API-assigned group when unset.
 
 ### Read-Only
 
