@@ -79,10 +79,8 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "River kind. Defaults to \"main_river\".",
 			},
 			"type": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("logic"),
-				Description: "River type (e.g. \"logic\", \"src_to_target\"). Defaults to \"logic\".",
+				Required:    true,
+				Description: "River type. One of: \"source_to_target\", \"logic\", \"actions\", \"connector_executor\".",
 			},
 			"description": schema.StringAttribute{
 				Optional:    true,
