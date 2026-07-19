@@ -356,11 +356,43 @@ func (c *Client) UpdateDataFlow(ctx context.Context, environmentID, id string, p
 		return nil, err
 	}
 	merged := stripForbidden(deepMerge(current, patch))
-	var out map[string]any
-	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+id), merged, &out); err != nil {
-		return nil, err
+	// properties is config-authoritative: the plan's properties must replace the
+	// server's version entirely, not be merged with it. Deep-merging carries over
+	// stale fields (e.g. cdc_settings/cdc_override from a prior CDC config) that
+	// make the API reject the update with a 422 validation error.
+	if pProps, ok := patch["properties"]; ok {
+		merged["properties"] = pProps
 	}
-	return normalizeID(out), nil
+	// The API rejects PUT with 400 "can not update properties for an active data
+	// flow" if the disable operation hasn't fully settled yet (common for CDC
+	// rivers where 204 disable is asynchronous in practice). Retry a few times.
+	const maxPUTRetries = 5
+	const putRetryDelay = 5 * time.Second
+	var out map[string]any
+	var lastErr error
+	for attempt := range maxPUTRetries {
+		lastErr = c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+id), merged, &out)
+		if lastErr == nil {
+			return normalizeID(out), nil
+		}
+		if attempt < maxPUTRetries-1 && isActiveFlowError(lastErr) {
+			time.Sleep(putRetryDelay)
+			continue
+		}
+		break
+	}
+	return nil, lastErr
+}
+
+// isActiveFlowError returns true when the API rejected a PUT because the river
+// is still considered active by the backend (happens after a fast 204 disable).
+func isActiveFlowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "can not update properties for an active data flow") ||
+		strings.Contains(msg, "Please disable the data flow")
 }
 
 // DeleteDataFlow deletes a data flow by id.
@@ -488,6 +520,65 @@ func (c *Client) DeleteDataFrame(ctx context.Context, environmentID, name string
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/dataframes/"+name), nil, nil)
 }
 
+// ---- Logicode files (environment-scoped, keyed by file_id) -----------------
+//
+// Logicode files are Python scripts that back logic-river logicode steps.
+// The API is create+read only — DELETE and PUT both return 405. Any change to
+// filename or content requires creating a new file (new file_id).
+//
+// Create flow: POST /logicode_file → {file_id, url (presigned PUT, 24h)}
+//              PUT <url> with Content-Type: text/x-python → 200
+// Read flow:   GET /logicode_file/{file_id} → {file_id, filename, url (presigned GET, 60s)}
+// Delete:      no API endpoint; TF removes from state only (file stays in S3).
+
+// LogicodeFileResponse is the shape returned by POST and GET.
+type LogicodeFileResponse struct {
+	FileID   string `json:"file_id"`
+	Filename string `json:"filename"`
+	URL      string `json:"url"`
+}
+
+// CreateLogicodeFile POSTs a new logicode file registration and returns the
+// file_id and the presigned S3 PUT URL to upload the script content.
+func (c *Client) CreateLogicodeFile(ctx context.Context, environmentID, filename string) (LogicodeFileResponse, error) {
+	var out LogicodeFileResponse
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/logicode_file"),
+		map[string]any{"file_name": filename}, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// UploadLogicodeContent PUTs the Python script content to the presigned S3 URL
+// returned by CreateLogicodeFile.
+func (c *Client) UploadLogicodeContent(ctx context.Context, uploadURL, content string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL,
+		strings.NewReader(content))
+	if err != nil {
+		return fmt.Errorf("building upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", "text/x-python")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("uploading logicode content: %w", err)
+	}
+	defer resp.Body.Close() // nolint:errcheck // best-effort close
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("S3 upload returned %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// GetLogicodeFile fetches a logicode file registration by file_id.
+func (c *Client) GetLogicodeFile(ctx context.Context, environmentID, fileID string) (LogicodeFileResponse, error) {
+	var out LogicodeFileResponse
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/logicode_file/"+fileID), nil, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 // ---- CDC config (river-scoped CDC offset) ----------------------------------
 //
 // The CDC offset is the source position a CDC river resumes from (mysql binlog,
@@ -552,12 +643,78 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, suffix), nil, nil)
 }
 
+// ---- River variables (river-scoped, replace-all semantics) -----------------
+//
+// River variables are distinct from environment variables. The API exposes only
+// two operations: GET /rivers/{id}/variables (list all) and PUT /rivers/{id}/variables
+// (replace-all — variables omitted from the body are deleted). There is no endpoint
+// for individual variable CRUD.
+//
+// Encrypted variable handling: PUT accepts plaintext and the API encrypts it.
+// GET returns a stable ciphertext (same value across reads; only changes when a new
+// plaintext is PUT). Crucially, PUTting the ciphertext back as-is preserves the value
+// without double-encrypting — enabling read-modify-write cycles without decryption.
+// There is no decrypt API.
+
+// RiverVariableSettings holds the per-variable metadata flags.
+type RiverVariableSettings struct {
+	ClearValueOnStart bool `json:"clear_value_on_start"`
+	IsMultiValue      bool `json:"is_multi_value"`
+	IsEncrypted       bool `json:"is_encrypted"`
+}
+
+// RiverVariable is a single item in the river variables collection.
+// Value is any because the API returns a string for single/encrypted vars and
+// a []any for multi-value vars.
+type RiverVariable struct {
+	Name     string                `json:"name"`
+	Settings RiverVariableSettings `json:"settings"`
+	Value    any                   `json:"value"`
+}
+
+type riverVariablesPage struct {
+	Items []RiverVariable `json:"items"`
+}
+
+// ListRiverVariables returns all variables for a river.
+func (c *Client) ListRiverVariables(ctx context.Context, environmentID, riverID string) ([]RiverVariable, error) {
+	var out riverVariablesPage
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// PutRiverVariables replaces the full variable list for a river. Pass an empty slice
+// to delete all variables.
+func (c *Client) PutRiverVariables(ctx context.Context, environmentID, riverID string, items []RiverVariable) ([]RiverVariable, error) {
+	body := map[string]any{"items": items}
+	var out riverVariablesPage
+	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), body, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
 // ---- Data flow runs (activate + trigger) -----------------------------------
 //
 // Running a data flow is a two-step imperative action, not a CRUD resource:
 // a flow must be active before it can run. ActivateDataFlow enables it (the API
 // answers 204 when already active, or 202 with an async operation to poll via
 // GetOperation), then RunDataFlow triggers an execution and returns the run id.
+
+// DisableDataFlow disables (deactivates) a data flow. Returns the async
+// operation id to poll when the API defers (202); empty means synchronous (204).
+func (c *Client) DisableDataFlow(ctx context.Context, environmentID, id string) (string, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/disable_river"), nil, &out); err != nil {
+		return "", err
+	}
+	if op, ok := out["operation_id"].(string); ok {
+		return op, nil
+	}
+	return "", nil
+}
 
 // ActivateDataFlow activates (enables) a data flow. Returns the async operation
 // id to poll when the API defers activation (202); an empty id means activation
@@ -583,6 +740,20 @@ func (c *Client) GetOperation(ctx context.Context, environmentID, operationID st
 	status, _ = out["status"].(string)
 	errMsg, _ = out["error_message"].(string)
 	return status, errMsg, nil
+}
+
+// EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
+// the river. Must be called after the river is updated to extract_method=log and
+// before the first CDC run. Returns the async operation id (empty = synchronous).
+func (c *Client) EnableCDCDataFlow(ctx context.Context, environmentID, id string) (string, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/enable_cdc"), nil, &out); err != nil {
+		return "", err
+	}
+	if op, ok := out["operation_id"].(string); ok {
+		return op, nil
+	}
+	return "", nil
 }
 
 // RunDataFlow triggers a run of a data flow, returning the first run id and the

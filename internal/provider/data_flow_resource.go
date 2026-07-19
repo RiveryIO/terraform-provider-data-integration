@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
@@ -12,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -41,6 +43,7 @@ type dataFlowModel struct {
 	PropertiesJSON jsontypes.Normalized `tfsdk:"properties_json"`
 	SettingsJSON   jsontypes.Normalized `tfsdk:"settings_json"`
 	GroupID        types.String         `tfsdk:"group_id"`
+	Activate       types.Bool           `tfsdk:"activate"`
 }
 
 func (r *dataFlowResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -114,6 +117,17 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"API-assigned group when unset.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
+			"activate": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				Description: "Whether to activate (enable) the data flow after create or update. " +
+					"When true the provider runs: disable (if already active) → update → activate. " +
+					"The disable+update step initialises the fire-service task entry that the " +
+					"activate_river API requires — rivers created via the API lack this entry until " +
+					"their first PUT, so setting activate = true here is the correct way to enable a " +
+					"freshly-created data flow.",
+			},
 		},
 	}
 }
@@ -147,6 +161,21 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	resp.Diagnostics.Append(r.apply(created, envID, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if plan.Activate.ValueBool() {
+		// A PUT after POST initialises the fire-service task entry that
+		// activate_river requires. Without this step, activation always fails
+		// with RVR-ACTIVATE-500 for API-created rivers.
+		if _, err2 := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body); err2 != nil {
+			addAPIError(&resp.Diagnostics, "Error initialising data flow before activation", err2)
+			return
+		}
+		resp.Diagnostics.Append(r.activateFlow(ctx, envID, plan.ID.ValueString(), dataFlowOpTimeout)...)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -171,8 +200,9 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan dataFlowModel
+	var plan, state dataFlowModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -183,12 +213,64 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	// Detect transition to CDC (log-based) extract method. When switching to log,
+	// the API validator requires a scheduler in the PUT body. We fetch the existing
+	// schedulers from the GET response and inject them so the validator passes.
+	switchingToCDC := isCDCFlow(plan.PropertiesJSON.ValueString()) &&
+		!isCDCFlow(state.PropertiesJSON.ValueString())
+
+	if switchingToCDC {
+		current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
+		if err != nil {
+			addAPIError(&resp.Diagnostics, "Error fetching data flow schedulers for CDC transition", err)
+			return
+		}
+		if schedulers, ok := current["schedulers"]; ok {
+			body["schedulers"] = schedulers
+		}
+	}
+
+	if plan.Activate.ValueBool() {
+		// Disable before editing — the API requires the river to be inactive
+		// during a PUT when it was previously active.
+		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
+			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
+			return
+		} else if opID != "" {
+			if !r.waitForOp(ctx, envID, opID, &resp.Diagnostics) {
+				return
+			}
+		}
+	}
+
 	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
 	if err != nil {
 		addAPIError(&resp.Diagnostics, "Error updating data flow", err)
 		return
 	}
 	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// After switching to CDC, enable_cdc must be called before the river can run.
+	// This is a one-time operation that sets ENABLE_LOG=true on the river.
+	if switchingToCDC {
+		resp.Diagnostics.Append(r.enableCDC(ctx, envID, plan.ID.ValueString())...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	if plan.Activate.ValueBool() {
+		// CDC rivers take longer to activate after enable_cdc — use the extended timeout.
+		activateTimeout := dataFlowOpTimeout
+		if switchingToCDC {
+			activateTimeout = cdcEnableOpTimeout
+		}
+		resp.Diagnostics.Append(r.activateFlow(ctx, envID, plan.ID.ValueString(), activateTimeout)...)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -228,6 +310,92 @@ func (r *dataFlowResource) ImportState(ctx context.Context, req resource.ImportS
 // rules learned validating against the live API: metadata/settings objects are
 // required, description lives under metadata.description, properties carries the
 // properties_type discriminator.
+const dataFlowOpTimeout = 5 * time.Minute
+const cdcEnableOpTimeout = 10 * time.Minute
+
+// activateFlow calls activate and polls the async operation.
+// Pass timeout=cdcEnableOpTimeout when activating immediately after enable_cdc,
+// since CDC rivers take longer to reach ACTIVE state.
+func (r *dataFlowResource) activateFlow(ctx context.Context, envID, id string, timeout time.Duration) diag.Diagnostics {
+	var diags diag.Diagnostics
+	opID, err := r.data.client.ActivateDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(&diags, "Error activating data flow", err)
+		return diags
+	}
+	if opID != "" {
+		r.waitForOpWithTimeout(ctx, envID, opID, timeout, &diags)
+	}
+	return diags
+}
+
+// enableCDC calls the enable_cdc endpoint and polls the async operation.
+// Required after switching a river to extract_method=log before it can run.
+// Uses a longer timeout since the operation sets up CDC binlog readers and
+// can take several minutes.
+func (r *dataFlowResource) enableCDC(ctx context.Context, envID, id string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	opID, err := r.data.client.EnableCDCDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(&diags, "Error enabling CDC for data flow", err)
+		return diags
+	}
+	if opID != "" {
+		r.waitForOpWithTimeout(ctx, envID, opID, cdcEnableOpTimeout, &diags)
+	}
+	return diags
+}
+
+// isCDCFlow returns true when the properties_json selects log-based extraction.
+func isCDCFlow(propertiesJSON string) bool {
+	var props struct {
+		Source struct {
+			AdditionalSettings struct {
+				ExtractMethod string `json:"extract_method"`
+			} `json:"additional_settings"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(propertiesJSON), &props); err != nil {
+		return false
+	}
+	return props.Source.AdditionalSettings.ExtractMethod == "log"
+}
+
+// waitForOp polls an async operation until done ("D") or error/timeout.
+func (r *dataFlowResource) waitForOp(ctx context.Context, envID, opID string, diags *diag.Diagnostics) bool {
+	return r.waitForOpWithTimeout(ctx, envID, opID, dataFlowOpTimeout, diags)
+}
+
+func (r *dataFlowResource) waitForOpWithTimeout(ctx context.Context, envID, opID string, timeout time.Duration, diags *diag.Diagnostics) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		status, errMsg, err := r.data.client.GetOperation(ctx, envID, opID)
+		if err != nil {
+			addAPIError(diags, "Error polling operation", err)
+			return false
+		}
+		switch status {
+		case "D":
+			return true
+		case "E":
+			diags.AddError("Data flow operation failed",
+				fmt.Sprintf("operation %s reported an error: %s", opID, errMsg))
+			return false
+		}
+		if time.Now().After(deadline) {
+			diags.AddError("Data flow operation timed out",
+				fmt.Sprintf("operation %s did not finish within %s (last status %q)", opID, timeout, status))
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			diags.AddError("Data flow operation cancelled", ctx.Err().Error())
+			return false
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (r *dataFlowResource) buildBody(plan dataFlowModel, diags *diag.Diagnostics) (map[string]any, bool) {
 	props, ok := decodeJSONObject(plan.PropertiesJSON, path.Root("properties_json"), diags)
 	if !ok {
