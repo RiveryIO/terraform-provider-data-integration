@@ -47,31 +47,28 @@ jobs:
     name: Docs are up to date
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # NON-BLOCKING for now. tfplugindocs runs its schema export under a provider
-    # local name equal to --provider-name (boomi_data_integration). Terraform
-    # >=1.8 forbids underscores in provider local names, so `terraform init`
-    # fails on any modern CLI. Making this pass reliably requires reworking the
-    # provider's naming (TypeName / registry type alignment), which is a separate
-    # decision from this CI/publishing setup. Tracked as a follow-up; until then
-    # this job reports drift without blocking the required checks.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
           cache: true
+      # Provide a Terraform binary on PATH so tfplugindocs exports the schema
+      # with it instead of downloading one (whose checksum signature fails to
+      # verify under tfplugindocs' pinned, now-expired HashiCorp GPG key).
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.7"
           terraform_wrapper: false
       - name: Install tfplugindocs
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.21.0
       - name: Regenerate docs
-        # provider-name must be the provider TypeName (boomi_data_integration),
-        # not the registry type (data-integration) — tfplugindocs strips this
-        # prefix from resource/data-source type names.
-        run: tfplugindocs generate --provider-name boomi_data_integration
+        # --provider-name is the provider's LOCAL NAME (`boomi`) — see
+        # "Provider naming" in README.md. It must NOT be the registry type
+        # (`data-integration`, invalid as a resource prefix) nor the full
+        # TypeName (`boomi_data_integration`, which has underscores that modern
+        # Terraform rejects as a provider local name). tfplugindocs strips the
+        # `boomi_` prefix, so docs land at docs/**/data_integration_*.md.
+        run: tfplugindocs generate --provider-name boomi
       - name: Fail if docs drifted
         run: |
           git diff --compact-summary --exit-code || {
