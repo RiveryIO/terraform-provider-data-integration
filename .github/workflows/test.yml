@@ -51,9 +51,12 @@ jobs:
           go-version-file: "go.mod"
           cache: true
       - name: Install tfplugindocs
-        run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
+        run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.21.0
       - name: Regenerate docs
-        run: tfplugindocs generate --provider-name data-integration
+        # provider-name must be the provider TypeName (boomi_data_integration),
+        # not the registry type (data-integration) — tfplugindocs strips this
+        # prefix from resource/data-source type names.
+        run: tfplugindocs generate --provider-name boomi_data_integration
       - name: Fail if docs drifted
         run: |
           git diff --compact-summary --exit-code || {
