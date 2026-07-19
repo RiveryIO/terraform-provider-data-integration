@@ -29,5 +29,8 @@ tidy:
 	go mod tidy
 
 # Regenerate registry docs from schema (requires tfplugindocs on PATH).
+# --provider-name is the provider LOCAL NAME (`boomi`), not the registry type or
+# the full resource prefix — see "Provider naming" in README.md. Docs land at
+# docs/**/data_integration_*.md. Works on any modern Terraform.
 docs:
-	tfplugindocs generate --provider-name boomi_data_integration
+	tfplugindocs generate --provider-name boomi

@@ -74,3 +74,6 @@ crash.*.log
 # Real variable values (may contain credentials) — keep only *.tfvars.example
 *.tfvars
 !*.tfvars.example
+
+# Local agent worktrees / tooling
+.claude/

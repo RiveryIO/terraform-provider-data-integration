@@ -23,6 +23,30 @@ Tracks Jira epic **CORE-2346**. This is the MVP provider phase that follows the
 All resources support `import`, drift detection via `Read`, and force-replace on
 immutable fields (`environment_id`, connection `type`).
 
+## Provider naming
+
+This provider carries **three different names** because Terraform, the Registry,
+and resource types each have different charset rules. Read this before touching
+`main.go`, the examples, or the docs pipeline.
+
+| Name | Value | Where it appears | Charset rule |
+|------|-------|------------------|--------------|
+| **Registry source / type** | `riveryio/data-integration` | `source = "riveryio/data-integration"`, `main.go` address | dashes OK, **no** underscores |
+| **Provider local name** | `boomi` | `required_providers { boomi = … }`, `provider "boomi"` | letters/digits/**dashes**, **no** underscores |
+| **Resource / data-source type** | `boomi_data_integration_*` | `resource "boomi_data_integration_environment"` | letters/digits/**underscores**, **no** dashes |
+
+The local name is the first `_`-segment of the resource type, so resources
+prefixed `boomi_…` are served by the provider declared as `boomi`. The registry
+type (`data-integration`) has a dash and so can be **neither** a resource prefix
+**nor** a provider local name — that is why the three names diverge.
+
+**Docs generation follows the LOCAL NAME.** `make docs` runs
+`tfplugindocs generate --provider-name boomi` (not `data-integration`, and not
+the full `boomi_data_integration`, which has underscores that modern Terraform
+rejects as a provider local name). tfplugindocs strips the `boomi_` prefix, so
+generated files land at `docs/**/data_integration_*.md`. If you regenerate docs
+with a different `--provider-name`, the CI docs-drift check will fail.
+
 ## Layout
 
 ```

@@ -49,6 +49,11 @@ func New(version string) func() provider.Provider {
 }
 
 func (p *dataIntegrationProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+	// TypeName is the resource/data-source prefix: boomi_data_integration_*.
+	// It differs from the provider local name (`boomi`) and the registry type
+	// (`data-integration`) on purpose — see "Provider naming" in README.md.
+	// Docs are generated with `--provider-name boomi`; changing this prefix
+	// requires updating that pipeline and regenerating docs/.
 	resp.TypeName = "boomi_data_integration"
 	resp.Version = p.version
 }
