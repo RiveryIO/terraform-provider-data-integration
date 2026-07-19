@@ -7,7 +7,7 @@
     "run_type": "regular",
     "cdc_settings": null,
     "additional_settings": {
-      "connection_type": "false",
+      "connection_type": null,
       "to_currency": [
         "USD"
       ],
