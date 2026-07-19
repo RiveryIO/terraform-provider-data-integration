@@ -206,7 +206,7 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 		}
 
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		switch {
 		case resp.StatusCode >= 200 && resp.StatusCode < 300:
