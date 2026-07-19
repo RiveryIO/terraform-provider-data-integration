@@ -1,0 +1,97 @@
+# Terraform Provider testing workflow — runs on every PR and push to main.
+#
+# Fast, no-cloud checks only. The destructive acceptance suite (TF_ACC=1, real
+# CRUD against the Data Integration API) is intentionally NOT run here — it needs
+# live credentials and creates real resources. Run it out-of-band via `make testacc`
+# or a separate scheduled/manual workflow.
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build + vet + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - run: go mod download
+      - run: go build -v ./...
+      - run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  docs:
+    name: Docs are up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - name: Install tfplugindocs
+        run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
+      - name: Regenerate docs
+        run: tfplugindocs generate --provider-name data-integration
+      - name: Fail if docs drifted
+        run: |
+          git diff --compact-summary --exit-code || {
+            echo "::error::docs/ is out of date — run 'make docs' and commit the result."
+            exit 1
+          }
+
+  fmt:
+    name: terraform fmt (examples)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive examples
+
+  test:
+    name: Unit tests (Terraform ${{ matrix.terraform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        terraform:
+          - "1.8.*"
+          - "1.9.*"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+      - run: go mod download
+      # TF_ACC is unset → acceptance tests auto-skip; this runs the unit suite only.
+      - run: go test -v -cover -count=1 ./internal/...
