@@ -29,8 +29,9 @@ import (
 
 const (
 	defaultTimeout    = 60 * time.Second
-	defaultMaxRetries = 3
+	defaultMaxRetries = 8
 	defaultBackoff    = time.Second
+	rateLimitBackoff  = 10 * time.Second // fixed pause on 429 before retrying
 	userAgent         = "terraform-provider-data-integration/0.1.0"
 )
 
@@ -220,6 +221,15 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 				return fmt.Errorf("decoding response: %w", err)
 			}
 			return nil
+		case resp.StatusCode == http.StatusTooManyRequests:
+			// 429 — rate limit hit. Sleep a fixed window then retry.
+			lastErr = &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(rateLimitBackoff):
+			}
+			continue
 		case resp.StatusCode >= 500:
 			lastErr = &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
 			continue // 5xx — retry
@@ -270,6 +280,24 @@ func stripForbidden(in map[string]any) map[string]any {
 	return out
 }
 
+// stripNulls recursively removes nil-valued keys from a map so the PUT body
+// does not include explicit nulls that some API validators reject (e.g.
+// connection_id/connection_name on built-in connectors).
+func stripNulls(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		if v == nil {
+			continue
+		}
+		if nested, ok := v.(map[string]any); ok {
+			out[k] = stripNulls(nested)
+		} else {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // normalizeID adds a stable "id" key across list (river_cross_id) vs detail
 // (cross_id / _id) response shapes, so the provider always reads one field.
 func normalizeID(raw map[string]any) map[string]any {
@@ -282,7 +310,7 @@ func normalizeID(raw map[string]any) map[string]any {
 	// resource apply() mappers read, so every resource round-trips cleanly.
 	normalizeField(raw, "id", "id", "river_cross_id", "cross_id", "_id")
 	normalizeField(raw, "name", "name", "connection_name", "environment_name", "river_name")
-	normalizeField(raw, "type", "type", "connection_type_id", "river_type")
+	normalizeField(raw, "type", "type", "connection_type", "connection_type_id", "river_type")
 	return raw
 }
 
@@ -358,7 +386,7 @@ func (c *Client) UpdateDataFlow(ctx context.Context, environmentID, id string, p
 	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+id), nil, &current); err != nil {
 		return nil, err
 	}
-	merged := stripForbidden(deepMerge(current, patch))
+	merged := stripNulls(stripForbidden(deepMerge(current, patch)))
 	// properties is config-authoritative: the plan's properties must replace the
 	// server's version entirely, not be merged with it. Deep-merging carries over
 	// stale fields (e.g. cdc_settings/cdc_override from a prior CDC config) that
