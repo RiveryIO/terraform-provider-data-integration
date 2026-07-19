@@ -22,9 +22,11 @@ A Data Integration connection to a data source or target.
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
 - `environment_id` (String) Environment this connection belongs to. Falls back to the provider-level environment_id. Changing it forces a new connection.
 - `fz_connection_id` (String) Cross-ID of the file-zone staging connection linked to this connection.
-- `parameters_json` (String, Sensitive) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
+- `parameters_json` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
 
 ### Read-Only
 
