@@ -110,11 +110,9 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"group_id": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Group (cross_id) the data flow belongs to. Required for logic flows " +
-					"whose steps use shared warehouse connections (e.g. a Snowflake SQL step): without " +
-					"it the platform cannot route the connection through the group and the warehouse " +
-					"driver fails at run time with a misleading connection/404 error. Falls back to the " +
-					"API-assigned group when unset.",
+				Description: "Group (cross_id) the data flow belongs to. " +
+					"Set to a valid group ID to place the data flow in a specific group, " +
+					"or null to let the platform assign one automatically.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"activate": schema.BoolAttribute{

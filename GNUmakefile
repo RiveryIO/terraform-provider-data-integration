@@ -28,9 +28,15 @@ vet:
 tidy:
 	go mod tidy
 
-# Regenerate registry docs from schema (requires tfplugindocs on PATH).
-# --provider-name is the provider LOCAL NAME (`boomi`), not the registry type or
-# the full resource prefix — see "Provider naming" in README.md. Docs land at
-# docs/**/data_integration_*.md. Works on any modern Terraform.
+# Regenerate registry docs from schema.
+# PIN both tools to match CI (test.yml) exactly — docs differ by tfplugindocs and
+# Terraform version (write-only markers require Terraform >= 1.11). Diverging
+# versions produce a docs-drift failure on every PR.
+#
+# Requires Terraform 1.11.4 on PATH. Install once:
+#   curl -fsSL https://releases.hashicorp.com/terraform/1.11.4/terraform_1.11.4_darwin_arm64.zip \
+#     | tar -xz -C /usr/local/bin terraform
+# (adjust OS/arch as needed; linux_amd64 on CI)
 docs:
+	go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.21.0
 	tfplugindocs generate --provider-name boomi
