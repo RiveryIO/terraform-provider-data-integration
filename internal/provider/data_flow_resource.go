@@ -110,15 +110,9 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"group_id": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Group (cross_id) the data flow belongs to. Required for logic flows " +
-					"whose steps use shared warehouse connections (e.g. a Snowflake SQL step): without " +
-					"it the platform cannot route the connection through the group and the warehouse " +
-					"driver fails at run time with a misleading connection/404 error. Falls back to the " +
-					"API-assigned group when unset. " +
-					"WARNING: when importing or copying config from another environment, always set " +
-					"this to null — a group_id that belongs to a different environment causes the " +
-					"server to drop the connection mid-response (EOF), which Terraform surfaces as a " +
-					"generic transport error rather than a clear validation failure.",
+				Description: "Group (cross_id) the data flow belongs to. " +
+					"Set to a valid group ID to place the data flow in a specific group, " +
+					"or null to let the platform assign one automatically.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"activate": schema.BoolAttribute{
@@ -162,15 +156,6 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 	created, err := r.data.client.CreateDataFlow(ctx, envID, body)
 	if err != nil {
 		addAPIError(&resp.Diagnostics, "Error creating data flow", err)
-		if !plan.GroupID.IsNull() && !plan.GroupID.IsUnknown() && plan.GroupID.ValueString() != "" {
-			resp.Diagnostics.AddAttributeWarning(
-				path.Root("group_id"),
-				"group_id may be invalid for this environment",
-				"The data flow create failed and group_id is set to \""+plan.GroupID.ValueString()+"\". "+
-					"If this ID was copied from another environment it does not exist here and the server "+
-					"drops the connection silently (EOF). Set group_id = null to let the platform assign one.",
-			)
-		}
 		return
 	}
 	resp.Diagnostics.Append(r.apply(created, envID, &plan)...)
