@@ -25,6 +25,8 @@ A Data Integration connection to a data source or target.
 - `environment_id` (String) Environment this connection belongs to. Falls back to the provider-level environment_id. Changing it forces a new connection.
 - `fz_connection_id` (String) Cross-ID of the file-zone staging connection linked to this connection.
 - `parameters_json` (String, Sensitive) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
+- `ssh_pkey_file` (String, Sensitive) Local path to a PEM private-key file used for SSH tunnel authentication. When set, the provider uploads the file on Create/Update via the connection-files API and stores the resulting server-side path in ssh_pkey_file_path. Write-only: never returned by the API, so this value is preserved from configuration and not refreshed.
+- `ssh_pkey_file_path` (String) Server-side path of the uploaded SSH private-key file. Populated automatically when ssh_pkey_file is provided; read back from the API on refresh. Can also be set explicitly to carry over a path from an imported connection without re-uploading the key.
 
 ### Read-Only
 

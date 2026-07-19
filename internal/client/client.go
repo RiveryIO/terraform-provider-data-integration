@@ -18,8 +18,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -438,6 +441,59 @@ func (c *Client) UpdateConnection(ctx context.Context, environmentID, id string,
 // DeleteConnection deletes a connection by id.
 func (c *Client) DeleteConnection(ctx context.Context, environmentID, id string) error {
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/connections/"+id), nil, nil)
+}
+
+// UploadConnectionFile uploads a local PEM file to the connection-file endpoint
+// and returns the server-side file_path. The file is POSTed as multipart/form-data
+// with field name "file". Endpoint:
+//
+//	POST /v1/accounts/{accountID}/environments/{envID}/connections/{connType}/files
+func (c *Client) UploadConnectionFile(ctx context.Context, environmentID, connType, localPath string) (string, error) {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return "", fmt.Errorf("opening SSH key file %q: %w", localPath, err)
+	}
+	defer f.Close() // nolint:errcheck // best-effort close
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filepath.Base(localPath))
+	if err != nil {
+		return "", fmt.Errorf("creating multipart field: %w", err)
+	}
+	if _, err = io.Copy(fw, f); err != nil {
+		return "", fmt.Errorf("reading SSH key file: %w", err)
+	}
+	if err = mw.Close(); err != nil {
+		return "", fmt.Errorf("finalizing multipart body: %w", err)
+	}
+
+	uploadURL := c.envPath(environmentID, fmt.Sprintf("/connections/%s/files", connType))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &buf)
+	if err != nil {
+		return "", fmt.Errorf("building upload request: %w", err)
+	}
+	req.Header = c.headers()
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("uploading SSH key file: %w", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: "POST " + uploadURL, Details: truncate(respBody)}
+	}
+
+	var out struct {
+		FilePath string `json:"file_path"`
+	}
+	if err = json.Unmarshal(respBody, &out); err != nil {
+		return "", fmt.Errorf("decoding upload response: %w", err)
+	}
+	return out.FilePath, nil
 }
 
 // ---- Environments (account-scoped) -----------------------------------------

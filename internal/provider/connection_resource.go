@@ -41,13 +41,15 @@ type connectionResource struct {
 }
 
 type connectionModel struct {
-	ID             types.String         `tfsdk:"id"`
-	EnvironmentID  types.String         `tfsdk:"environment_id"`
-	Name           types.String         `tfsdk:"name"`
-	Type           types.String         `tfsdk:"type"`
-	ParametersJSON jsontypes.Normalized `tfsdk:"parameters_json"`
-	FzConnectionID types.String         `tfsdk:"fz_connection_id"`
-	ConnectionInfo jsontypes.Normalized `tfsdk:"connection_info"`
+	ID              types.String         `tfsdk:"id"`
+	EnvironmentID   types.String         `tfsdk:"environment_id"`
+	Name            types.String         `tfsdk:"name"`
+	Type            types.String         `tfsdk:"type"`
+	ParametersJSON  jsontypes.Normalized `tfsdk:"parameters_json"`
+	FzConnectionID  types.String         `tfsdk:"fz_connection_id"`
+	ConnectionInfo  jsontypes.Normalized `tfsdk:"connection_info"`
+	SshPkeyFile     types.String         `tfsdk:"ssh_pkey_file"`
+	SshPkeyFilePath types.String         `tfsdk:"ssh_pkey_file_path"`
 }
 
 func (r *connectionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -104,6 +106,21 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"(e.g. username, warehouse, host, role). Populated automatically — " +
 					"do not set manually. Secret fields are never included.",
 			},
+			"ssh_pkey_file": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				Description: "Local path to a PEM private-key file used for SSH tunnel authentication. " +
+					"When set, the provider uploads the file on Create/Update via the connection-files API " +
+					"and stores the resulting server-side path in ssh_pkey_file_path. Write-only: never " +
+					"returned by the API, so this value is preserved from configuration and not refreshed.",
+			},
+			"ssh_pkey_file_path": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Server-side path of the uploaded SSH private-key file. " +
+					"Populated automatically when ssh_pkey_file is provided; read back from the API on refresh. " +
+					"Can also be set explicitly to carry over a path from an imported connection without re-uploading the key.",
+			},
 		},
 	}
 }
@@ -137,11 +154,30 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	// Upload SSH key before creating so its path lands in the same body as
+	// credentials — a separate PATCH after creation would wipe secrets, because
+	// the API redacts them on GET (read-modify-write would overwrite with empty).
+	var sshFilePath string
+	if !plan.SshPkeyFile.IsNull() && !plan.SshPkeyFile.IsUnknown() {
+		fp, uploadErr := r.data.client.UploadConnectionFile(ctx, envID, plan.Type.ValueString(), plan.SshPkeyFile.ValueString())
+		if uploadErr != nil {
+			addAPIError(&resp.Diagnostics, "Error uploading SSH key file", uploadErr)
+			return
+		}
+		sshFilePath = fp
+	}
+
 	// The connections API speaks connection_name / connection_type (not the
 	// generic name/type used by rivers and environments).
 	body := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
 	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
 		body["fz_connection_id"] = plan.FzConnectionID.ValueString()
+	}
+	if sshFilePath != "" {
+		body["ssh_pkey_file_path"] = sshFilePath
+	} else if !plan.SshPkeyFilePath.IsNull() && !plan.SshPkeyFilePath.IsUnknown() {
+		// Allow explicitly carrying over a server-side path (e.g. copied from an import).
+		body["ssh_pkey_file_path"] = plan.SshPkeyFilePath.ValueString()
 	}
 	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
 		mergeParams(body, params)
@@ -228,9 +264,27 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
+	// Upload SSH key before the PUT so its path is included in the same write
+	// as the credentials — avoids a second read-modify-write that would wipe secrets.
+	var sshFilePath string
+	if !plan.SshPkeyFile.IsNull() && !plan.SshPkeyFile.IsUnknown() {
+		fp, uploadErr := r.data.client.UploadConnectionFile(ctx, envID, plan.Type.ValueString(), plan.SshPkeyFile.ValueString())
+		if uploadErr != nil {
+			addAPIError(&resp.Diagnostics, "Error uploading SSH key file", uploadErr)
+			return
+		}
+		sshFilePath = fp
+	}
+
 	patch := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
 	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
 		patch["fz_connection_id"] = plan.FzConnectionID.ValueString()
+	}
+	if sshFilePath != "" {
+		patch["ssh_pkey_file_path"] = sshFilePath
+	} else if !plan.SshPkeyFilePath.IsNull() && !plan.SshPkeyFilePath.IsUnknown() {
+		// Preserve the existing server-side path when not re-uploading (e.g. after import).
+		patch["ssh_pkey_file_path"] = plan.SshPkeyFilePath.ValueString()
 	}
 	if hasParams {
 		mergeParams(patch, params)
@@ -293,6 +347,13 @@ func (r *connectionResource) apply(api map[string]any, envID string, m *connecti
 	} else {
 		m.FzConnectionID = types.StringNull()
 	}
+	if fp := asString(api["ssh_pkey_file_path"]); fp != "" {
+		m.SshPkeyFilePath = types.StringValue(fp)
+	} else {
+		m.SshPkeyFilePath = types.StringNull()
+	}
+	// SshPkeyFile is intentionally not updated here — it is write-only and never
+	// returned by the API, so it must be preserved from prior plan/state.
 
 	// Build connection_info: full API response minus any secret fields.
 	safe := make(map[string]any, len(api))
@@ -329,7 +390,7 @@ func (r *connectionResource) decodeParams(m connectionModel, diags *diag.Diagnos
 // clobbering the reserved top-level keys.
 func mergeParams(body, params map[string]any) {
 	for k, v := range params {
-		if k == "name" || k == "type" {
+		if k == "name" || k == "type" || k == "ssh_pkey_file_path" {
 			continue
 		}
 		body[k] = v
