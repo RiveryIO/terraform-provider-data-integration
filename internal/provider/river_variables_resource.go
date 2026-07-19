@@ -31,11 +31,11 @@ type riverVariablesResource struct {
 
 // riverVariableModel is the Terraform schema model for one variable block.
 type riverVariableModel struct {
-	Name               types.String `tfsdk:"name"`
-	Value              types.String `tfsdk:"value"`
-	IsMultiValue       types.Bool   `tfsdk:"is_multi_value"`
-	IsEncrypted        types.Bool   `tfsdk:"is_encrypted"`
-	ClearValueOnStart  types.Bool   `tfsdk:"clear_value_on_start"`
+	Name              types.String `tfsdk:"name"`
+	Value             types.String `tfsdk:"value"`
+	IsMultiValue      types.Bool   `tfsdk:"is_multi_value"`
+	IsEncrypted       types.Bool   `tfsdk:"is_encrypted"`
+	ClearValueOnStart types.Bool   `tfsdk:"clear_value_on_start"`
 }
 
 // riverVariablesModel is the top-level resource model.
@@ -47,10 +47,10 @@ type riverVariablesModel struct {
 }
 
 var riverVariableAttrTypes = map[string]attr.Type{
-	"name":                types.StringType,
-	"value":               types.StringType,
-	"is_multi_value":      types.BoolType,
-	"is_encrypted":        types.BoolType,
+	"name":                 types.StringType,
+	"value":                types.StringType,
+	"is_multi_value":       types.BoolType,
+	"is_encrypted":         types.BoolType,
 	"clear_value_on_start": types.BoolType,
 }
 
@@ -67,8 +67,8 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 			"plaintext is written. Multi-value variable values are stored as a JSON array string.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Resource ID. Equals <environment_id>/<river_id>.",
+				Computed:      true,
+				Description:   "Resource ID. Equals <environment_id>/<river_id>.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"environment_id": schema.StringAttribute{
@@ -81,8 +81,8 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 				},
 			},
 			"river_id": schema.StringAttribute{
-				Required:    true,
-				Description: "Cross-ID of the river whose variables this resource manages. Changing it forces a new resource.",
+				Required:      true,
+				Description:   "Cross-ID of the river whose variables this resource manages. Changing it forces a new resource.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 		},
@@ -96,8 +96,8 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 							Description: "Variable name.",
 						},
 						"value": schema.StringAttribute{
-							Required:    true,
-							Sensitive:   true,
+							Required:  true,
+							Sensitive: true,
 							Description: "Variable value. For multi-value variables, provide a JSON array string (e.g. '[1,2]'). " +
 								"For encrypted variables, provide the plaintext — the API encrypts it and stores the ciphertext.",
 						},
@@ -128,35 +128,6 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 
 func (r *riverVariablesResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.data = configureProviderData(req, resp)
-}
-
-// apiToModel converts the API response slice into the TF list value.
-// For encrypted variables the value stored is the ciphertext returned by the API.
-// For multi-value variables the value is the JSON-serialised array.
-func apiToModel(ctx context.Context, items []client.RiverVariable) (types.List, error) {
-	elems := make([]attr.Value, 0, len(items))
-	for _, v := range items {
-		valStr, err := valueToString(v)
-		if err != nil {
-			return types.ListNull(types.ObjectType{AttrTypes: riverVariableAttrTypes}), err
-		}
-		obj, diags := types.ObjectValue(riverVariableAttrTypes, map[string]attr.Value{
-			"name":                types.StringValue(v.Name),
-			"value":               types.StringValue(valStr),
-			"is_multi_value":      types.BoolValue(v.Settings.IsMultiValue),
-			"is_encrypted":        types.BoolValue(v.Settings.IsEncrypted),
-			"clear_value_on_start": types.BoolValue(v.Settings.ClearValueOnStart),
-		})
-		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: riverVariableAttrTypes}), errors.New(diags.Errors()[0].Detail())
-		}
-		elems = append(elems, obj)
-	}
-	listVal, diags := types.ListValue(types.ObjectType{AttrTypes: riverVariableAttrTypes}, elems)
-	if diags.HasError() {
-		return types.ListNull(types.ObjectType{AttrTypes: riverVariableAttrTypes}), errors.New(diags.Errors()[0].Detail())
-	}
-	return listVal, nil
 }
 
 // valueToString serialises the API's any-typed value to the string stored in state.
