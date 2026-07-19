@@ -30,4 +30,4 @@ tidy:
 
 # Regenerate registry docs from schema (requires tfplugindocs on PATH).
 docs:
-	tfplugindocs generate --provider-name data-integration
+	tfplugindocs generate --provider-name boomi_data_integration

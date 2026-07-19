@@ -26,7 +26,7 @@ immutable fields (`environment_id`, connection `type`).
 ## Layout
 
 ```
-main.go                              provider entrypoint (registry addr boomi/data-integration)
+main.go                              provider entrypoint (registry addr riveryio/data-integration)
 internal/client/                     Data Integration API client (Go port of poc/rivery_client.py)
 internal/provider/                   provider + resource implementations
 examples/                            runnable example configuration
@@ -55,7 +55,7 @@ To try the provider against the examples without publishing, use a dev override:
 ```bash
 cat > dev.tfrc <<EOF
 provider_installation {
-  dev_overrides { "boomi/data-integration" = "$(pwd)/bin" }
+  dev_overrides { "riveryio/data-integration" = "$(pwd)/bin" }
   direct {}
 }
 EOF

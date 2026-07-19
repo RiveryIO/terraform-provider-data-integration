@@ -1,7 +1,7 @@
 # source_to_target → BigQuery example
 
 Authors a `source_to_target` river targeting **BigQuery** with the
-`boomi/data-integration` provider. Modeled on a real integration river (ECB
+`riveryio/data-integration` provider. Modeled on a real integration river (ECB
 exchange rates → BigQuery): `properties.json` is the exact `source_to_target`
 body the API accepts (source + 10-column mapping + `loading_method=overwrite`);
 `main.tf` creates a fresh `gcloud` connection and wires its id + the target

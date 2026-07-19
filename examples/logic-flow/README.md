@@ -1,7 +1,7 @@
 # Logic river example (multi-step)
 
 Creates a **logic river** (`type = logic` data flow) with the
-`boomi/data-integration` provider. A logic river runs an ordered pipeline of
+`riveryio/data-integration` provider. A logic river runs an ordered pipeline of
 steps; this example builds a `run_once` container with three step types:
 
 1. **`river`** — run an existing river (e.g. the one from

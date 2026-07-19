@@ -1,4 +1,4 @@
-# source_to_target river → BigQuery, authored with the boomi/data-integration
+# source_to_target river → BigQuery, authored with the riveryio/data-integration
 # provider. Modeled on a real integration river (ECB rates → BigQuery). The river
 # body is opaque JSON (properties.json) mirroring the exact source_to_target
 # structure the API accepts; only the target connection_id + dataset are wired
@@ -14,7 +14,7 @@
 terraform {
   required_providers {
     boomi = {
-      source = "boomi/data-integration"
+      source = "riveryio/data-integration"
     }
   }
 }
