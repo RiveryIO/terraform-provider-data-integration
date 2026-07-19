@@ -53,8 +53,13 @@ jobs:
       # Provide a Terraform binary on PATH so tfplugindocs exports the schema
       # with it instead of downloading one (whose checksum signature fails to
       # verify under tfplugindocs' pinned, now-expired HashiCorp GPG key).
+      # Pinned to 1.5.7: tfplugindocs runs the schema export under a provider
+      # local name equal to --provider-name (boomi_data_integration). Terraform
+      # >=1.8 rejects underscores in provider local names, so a modern CLI fails
+      # `terraform init`; 1.5.7 accepts it (and is what the committed docs used).
       - uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: "1.5.7"
           terraform_wrapper: false
       - name: Install tfplugindocs
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.21.0
