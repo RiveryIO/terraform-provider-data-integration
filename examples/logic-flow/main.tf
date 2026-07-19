@@ -1,4 +1,4 @@
-# Multi-step logic river authored with the boomi/data-integration provider.
+# Multi-step logic river authored with the riveryio/data-integration provider.
 #
 # A logic river orchestrates other steps in order. This example builds a
 # `run_once` container with up to three step types:
@@ -23,7 +23,7 @@
 terraform {
   required_providers {
     boomi = {
-      source = "boomi/data-integration"
+      source = "riveryio/data-integration"
     }
   }
 }

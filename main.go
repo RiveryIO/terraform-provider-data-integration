@@ -21,8 +21,8 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		// Registry address: namespace/type → boomi/data-integration.
-		Address: "registry.terraform.io/boomi/data-integration",
+		// Registry address: namespace/type → riveryio/data-integration.
+		Address: "registry.terraform.io/riveryio/data-integration",
 		Debug:   debug,
 	}
 

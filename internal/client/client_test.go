@@ -45,7 +45,7 @@ func TestScopedPaths_And_AuthHeader(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotPlugin = r.Header.Get("X-Boomi-Plugin")
-		w.Write([]byte(`{"_id":"e1","name":"prod"}`))
+		_, _ = w.Write([]byte(`{"_id":"e1","name":"prod"}`))
 	}))
 	defer srv.Close()
 
@@ -68,7 +68,7 @@ func TestEnvScopedPath(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		w.Write([]byte(`{"cross_id":"r1","name":"flow"}`))
+		_, _ = w.Write([]byte(`{"cross_id":"r1","name":"flow"}`))
 	}))
 	defer srv.Close()
 	c := testClient(t, srv)
@@ -111,7 +111,7 @@ func TestRetryOn5xxThenSuccess(t *testing.T) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(`{"_id":"e1"}`))
+		_, _ = w.Write([]byte(`{"_id":"e1"}`))
 	}))
 	defer srv.Close()
 	c := testClient(t, srv)
@@ -140,9 +140,9 @@ func TestListDataFlowsPagination(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
 		case "1":
-			w.Write([]byte(`{"items":[{"river_cross_id":"a"}],"next_page":2}`))
+			_, _ = w.Write([]byte(`{"items":[{"river_cross_id":"a"}],"next_page":2}`))
 		default:
-			w.Write([]byte(`{"items":[{"river_cross_id":"b"}],"next_page":null}`))
+			_, _ = w.Write([]byte(`{"items":[{"river_cross_id":"b"}],"next_page":null}`))
 		}
 	}))
 	defer srv.Close()
@@ -166,11 +166,11 @@ func TestUpdateIsReadModifyWriteAndStripsForbidden(t *testing.T) {
 		switch r.Method {
 		case http.MethodGet:
 			// server returns forbidden fields + a sub-field the patch doesn't touch
-			w.Write([]byte(`{"cross_id":"r1","account_id":"acct1","name":"old","metadata":{"description":"old","keep":"yes"}}`))
+			_, _ = w.Write([]byte(`{"cross_id":"r1","account_id":"acct1","name":"old","metadata":{"description":"old","keep":"yes"}}`))
 		case http.MethodPut:
 			b, _ := io.ReadAll(r.Body)
-			json.Unmarshal(b, &putBody)
-			w.Write([]byte(`{"cross_id":"r1","name":"new"}`))
+			_ = json.Unmarshal(b, &putBody)
+			_, _ = w.Write([]byte(`{"cross_id":"r1","name":"new"}`))
 		}
 	}))
 	defer srv.Close()
