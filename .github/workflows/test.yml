@@ -56,8 +56,14 @@ jobs:
       # Provide a Terraform binary on PATH so tfplugindocs exports the schema
       # with it instead of downloading one (whose checksum signature fails to
       # verify under tfplugindocs' pinned, now-expired HashiCorp GPG key).
+      # PIN the version: write-only attributes (e.g. connection.parameters_json)
+      # only render their "[Write-only]" marker under Terraform >= 1.11, so the
+      # generated docs differ by CLI version. Pinning keeps the drift check
+      # reproducible — regenerate locally with the same version (`make docs`
+      # with Terraform 1.11.x) to match.
       - uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: "1.11.4"
           terraform_wrapper: false
       - name: Install tfplugindocs
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.21.0
