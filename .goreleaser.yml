@@ -34,6 +34,12 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
+  # The manifest MUST be hashed into SHA256SUMS too — the Terraform Registry
+  # rejects a version with "missing SHA256 checksum for ..._manifest.json" if it
+  # is only uploaded (release.extra_files) but not checksummed here.
+  extra_files:
+    - glob: "terraform-registry-manifest.json"
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
 
