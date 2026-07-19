@@ -878,6 +878,55 @@ func (c *Client) ListSourceTypes(ctx context.Context) ([]map[string]any, error) 
 	return c.listTypeCatalog(ctx, "data_source_types", false)
 }
 
+// ---- River groups ----------------------------------------------------------
+
+// RiverGroup is the normalised view of a river group returned by the v1 API.
+type RiverGroup struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Color     string `json:"color"`
+	Icon      string `json:"icon"`
+	IsDefault bool   `json:"is_default"`
+}
+
+// ListRiverGroups returns every river group in the environment. The v1 API
+// exposes GET only for groups; creation/mutation is UI-only (allow_from_api=false
+// on the internal route). This method pages until exhausted.
+func (c *Client) ListRiverGroups(ctx context.Context, environmentID string) ([]RiverGroup, error) {
+	var all []RiverGroup
+	for page := 1; ; page++ {
+		var resp struct {
+			Items      []map[string]any `json:"items"`
+			TotalItems int              `json:"total_items"`
+		}
+		u := c.envPath(environmentID, fmt.Sprintf("/river_groups?page=%d", page))
+		if err := c.request(ctx, http.MethodGet, u, nil, &resp); err != nil {
+			return nil, err
+		}
+		for _, it := range resp.Items {
+			str := func(v any) string {
+				s, _ := v.(string)
+				return s
+			}
+			id := str(it["cross_id"])
+			if id == "" {
+				id = str(it["id"])
+			}
+			all = append(all, RiverGroup{
+				ID:        id,
+				Name:      str(it["name"]),
+				Color:     str(it["color"]),
+				Icon:      str(it["icon"]),
+				IsDefault: it["is_default"] == true,
+			})
+		}
+		if len(resp.Items) == 0 || (resp.TotalItems > 0 && len(all) >= resp.TotalItems) {
+			break
+		}
+	}
+	return all, nil
+}
+
 // ListTargetTypes returns the target type catalog (/v1/target_types) — each row
 // { name, target_type, connection_type, logic_step_type, river_type_id, ... }.
 func (c *Client) ListTargetTypes(ctx context.Context) ([]map[string]any, error) {
