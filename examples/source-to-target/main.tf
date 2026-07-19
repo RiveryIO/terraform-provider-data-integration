@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     boomi = {
-      source = "boomi/data-integration"
+      source = "riveryio/data-integration"
     }
   }
 }
