@@ -3,12 +3,22 @@
 page_title: "boomi_data_integration_dataframe Resource - boomi"
 subcategory: ""
 description: |-
-  A Data Integration dataframe. Dataframes are environment-scoped and keyed by their unique name (the API has no separate id).
+  A Data Integration dataframe — a named parquet store used by logicode (Python) rivers.
+  Two storage types exist:
+  • Internal (river-managed): omit connection_settings. Rivery allocates the S3 path automatically and injects STS credentials at runtime. The only creation requirement is name.
+  • File-zone (custom): include connection_settings pointing to a boomi_data_integration_connection that owns the customer's S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
+  The API keys dataframes by name (no separate cross_id is returned). Changing the name forces a new dataframe — existing parquet files at the old S3 path are orphaned.
 ---
 
 # boomi_data_integration_dataframe (Resource)
 
-A Data Integration dataframe. Dataframes are environment-scoped and keyed by their unique name (the API has no separate id).
+A Data Integration dataframe — a named parquet store used by logicode (Python) rivers.
+
+Two storage types exist:
+  • **Internal** (river-managed): omit `connection_settings`. Rivery allocates the S3 path automatically and injects STS credentials at runtime. The only creation requirement is `name`.
+  • **File-zone** (custom): include `connection_settings` pointing to a `boomi_data_integration_connection` that owns the customer's S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
+
+The API keys dataframes by `name` (no separate cross_id is returned). Changing the name forces a new dataframe — existing parquet files at the old S3 path are orphaned.
 
 
 
@@ -17,21 +27,21 @@ A Data Integration dataframe. Dataframes are environment-scoped and keyed by the
 
 ### Required
 
-- `name` (String) Dataframe name. Must be unique within the environment. The API does not support renaming, so changing it forces a new dataframe.
+- `name` (String) Dataframe name — must be unique within the environment and must match the import name used in the river's Python code (`from rivery_dataframes import <name>`). The API does not support renaming, so changing it forces a new dataframe.
 
 ### Optional
 
-- `connection_settings` (Attributes) Storage connection settings for the dataframe's parquet files. The only field the API allows to be updated in place. (see [below for nested schema](#nestedatt--connection_settings))
+- `connection_settings` (Attributes) Storage connection for a file-zone (custom) dataframe. Omit this block to create an internal (river-managed) dataframe whose S3 path and credentials are managed by Rivery automatically. When present, this block is the only field the API allows to be updated in place. (see [below for nested schema](#nestedatt--connection_settings))
 - `environment_id` (String) Environment this dataframe belongs to. Falls back to the provider-level environment_id. Changing it forces a new dataframe.
 
 ### Read-Only
 
-- `id` (String) Resource id. Equals the dataframe name (the API keys dataframes by name).
+- `id` (String) Resource id — equals the dataframe name (the API uses name as the identifier).
 
 <a id="nestedatt--connection_settings"></a>
 ### Nested Schema for `connection_settings`
 
-Required:
+Optional:
 
 - `connection` (String) ID of the storage connection (cross-reference a boomi_data_integration_connection).
 - `datasource_id` (String) Datasource identifier of the connection (e.g. "s3", "gcs").

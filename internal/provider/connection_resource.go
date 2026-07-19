@@ -23,6 +23,16 @@ var (
 	_ resource.ResourceWithImportState = (*connectionResource)(nil)
 )
 
+// secretAPIFields are field names that contain actual secret values returned by
+// the API. Strip these from connection_info so state never holds credentials.
+var secretAPIFields = map[string]bool{
+	"password": true, "account_key": true, "access_token": true,
+	"personal_access_token": true, "aws_access_secret": true,
+	"aws_access_key": true, "service_account_json": true,
+	"private_key": true, "secret_key": true, "api_key": true,
+	"client_secret": true, "api_token": true, "credentials": true,
+}
+
 // NewConnectionResource is the factory registered with the provider.
 func NewConnectionResource() resource.Resource { return &connectionResource{} }
 
@@ -36,6 +46,8 @@ type connectionModel struct {
 	Name           types.String         `tfsdk:"name"`
 	Type           types.String         `tfsdk:"type"`
 	ParametersJSON jsontypes.Normalized `tfsdk:"parameters_json"`
+	FzConnectionID types.String         `tfsdk:"fz_connection_id"`
+	ConnectionInfo jsontypes.Normalized `tfsdk:"connection_info"`
 }
 
 func (r *connectionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -74,10 +86,23 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"parameters_json": schema.StringAttribute{
 				Optional:   true,
 				Sensitive:  true,
+				WriteOnly:  true,
 				CustomType: jsontypes.NormalizedType{},
 				Description: "Connection-type-specific parameters as a JSON object, including " +
-					"credentials. Treated as write-only: the API omits secrets on read, so this " +
-					"value is preserved from configuration and never refreshed from the API.",
+					"credentials. Write-only: never stored in state. The API omits secrets on " +
+					"read, so drift detection for credentials is not possible.",
+			},
+			"fz_connection_id": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Cross-ID of the file-zone staging connection linked to this connection.",
+			},
+			"connection_info": schema.StringAttribute{
+				Computed:   true,
+				CustomType: jsontypes.NormalizedType{},
+				Description: "Non-sensitive fields returned by the API on every read " +
+					"(e.g. username, warehouse, host, role). Populated automatically — " +
+					"do not set manually. Secret fields are never included.",
 			},
 		},
 	}
@@ -94,6 +119,17 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	// WriteOnly attributes are erased from the plan by the framework (they are never stored
+	// in state). Read parameters_json from the config so the credentials reach the API.
+	if plan.ParametersJSON.IsNull() || plan.ParametersJSON.IsUnknown() {
+		var cfg connectionModel
+		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.ParametersJSON = cfg.ParametersJSON
+	}
+
 	envID := resolveEnvironmentID(plan.EnvironmentID.ValueString(), r.data)
 	if envID == "" {
 		resp.Diagnostics.AddAttributeError(path.Root("environment_id"), "Missing environment_id",
@@ -104,6 +140,9 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	// The connections API speaks connection_name / connection_type (not the
 	// generic name/type used by rivers and environments).
 	body := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
+	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
+		body["fz_connection_id"] = plan.FzConnectionID.ValueString()
+	}
 	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
 		mergeParams(body, params)
 	} else if resp.Diagnostics.HasError() {
@@ -115,7 +154,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		addAPIError(&resp.Diagnostics, "Error creating connection", err)
 		return
 	}
-	r.apply(created, envID, &plan)
+	r.apply(created, envID, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -135,9 +174,7 @@ func (r *connectionResource) Read(ctx context.Context, req resource.ReadRequest,
 		addAPIError(&resp.Diagnostics, "Error reading connection", err)
 		return
 	}
-	// apply preserves parameters_json from prior state — never overwritten from
-	// the API, which omits credentials on read.
-	r.apply(conn, state.EnvironmentID.ValueString(), &state)
+	r.apply(conn, state.EnvironmentID.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -147,13 +184,56 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// WriteOnly attributes are erased from the plan by the framework. Read
+	// parameters_json from the config so credentials are applied on updates too.
+	if plan.ParametersJSON.IsNull() || plan.ParametersJSON.IsUnknown() {
+		var cfg connectionModel
+		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.ParametersJSON = cfg.ParametersJSON
+	}
+
 	envID := plan.EnvironmentID.ValueString()
 
-	patch := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
-	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
-		mergeParams(patch, params)
-	} else if resp.Diagnostics.HasError() {
+	params, hasParams := r.decodeParams(plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// Guard: the Rivery API omits secrets on GET, so a PUT without credentials
+	// clears any existing password. If the caller isn't providing credentials
+	// and the current connection has a password set, refuse the update to avoid
+	// silent data loss. The caller must supply parameters_json to update a
+	// connection that already has credentials.
+	if !hasParams {
+		current, err := r.data.client.GetConnection(ctx, envID, plan.ID.ValueString())
+		if err != nil {
+			addAPIError(&resp.Diagnostics, "Error reading connection before update", err)
+			return
+		}
+		if current["password_exists"] == true ||
+			current["account_key_exists"] == true ||
+			current["api_token_exists"] == true {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("parameters_json"),
+				"parameters_json required for update",
+				"This connection has credentials set in the API. Updating without "+
+					"parameters_json would clear them. Provide the current credentials "+
+					"in parameters_json to proceed.",
+			)
+			return
+		}
+	}
+
+	patch := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
+	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
+		patch["fz_connection_id"] = plan.FzConnectionID.ValueString()
+	}
+	if hasParams {
+		mergeParams(patch, params)
 	}
 
 	updated, err := r.data.client.UpdateConnection(ctx, envID, plan.ID.ValueString(), patch)
@@ -161,7 +241,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		addAPIError(&resp.Diagnostics, "Error updating connection", err)
 		return
 	}
-	r.apply(updated, envID, &plan)
+	r.apply(updated, envID, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -197,14 +277,36 @@ func (r *connectionResource) ImportState(ctx context.Context, req resource.Impor
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), envID)...)
 }
 
-// apply maps an API response onto the model. parameters_json is intentionally
-// left untouched (write-only secret handling).
-func (r *connectionResource) apply(api map[string]any, envID string, m *connectionModel) {
+// apply maps an API response onto the model.
+// parameters_json is intentionally left untouched (write-only secret handling).
+// connection_info is populated from the API response with secret fields stripped.
+func (r *connectionResource) apply(api map[string]any, envID string, m *connectionModel, diags *diag.Diagnostics) {
 	m.ID = types.StringValue(asString(api["id"]))
 	m.EnvironmentID = types.StringValue(envID)
 	m.Name = types.StringValue(asString(api["name"]))
-	if t := asString(api["type"]); t != "" {
+	// API returns "connection_type", not "type".
+	if t := asString(api["connection_type"]); t != "" {
 		m.Type = types.StringValue(t)
+	}
+	if fz := asString(api["fz_connection_id"]); fz != "" {
+		m.FzConnectionID = types.StringValue(fz)
+	} else {
+		m.FzConnectionID = types.StringNull()
+	}
+
+	// Build connection_info: full API response minus any secret fields.
+	safe := make(map[string]any, len(api))
+	for k, v := range api {
+		if !secretAPIFields[k] {
+			safe[k] = v
+		}
+	}
+	infoBytes, err := json.Marshal(safe)
+	if err != nil {
+		diags.AddWarning("connection_info serialization failed", err.Error())
+		m.ConnectionInfo = jsontypes.NewNormalizedNull()
+	} else {
+		m.ConnectionInfo = jsontypes.NewNormalizedValue(string(infoBytes))
 	}
 }
 

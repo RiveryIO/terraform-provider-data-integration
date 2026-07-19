@@ -23,8 +23,10 @@ A Data Integration connection to a data source or target.
 ### Optional
 
 - `environment_id` (String) Environment this connection belongs to. Falls back to the provider-level environment_id. Changing it forces a new connection.
-- `parameters_json` (String, Sensitive) Connection-type-specific parameters as a JSON object, including credentials. Treated as write-only: the API omits secrets on read, so this value is preserved from configuration and never refreshed from the API.
+- `fz_connection_id` (String) Cross-ID of the file-zone staging connection linked to this connection.
+- `parameters_json` (String, Sensitive) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
 
 ### Read-Only
 
+- `connection_info` (String) Non-sensitive fields returned by the API on every read (e.g. username, warehouse, host, role). Populated automatically — do not set manually. Secret fields are never included.
 - `id` (String) Connection ID, assigned by the API.

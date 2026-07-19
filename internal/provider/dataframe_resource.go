@@ -46,12 +46,20 @@ func (r *dataFrameResource) Metadata(_ context.Context, req resource.MetadataReq
 
 func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A Data Integration dataframe. Dataframes are environment-scoped and keyed by " +
-			"their unique name (the API has no separate id).",
+		Description: "A Data Integration dataframe — a named parquet store used by logicode (Python) rivers.\n\n" +
+			"Two storage types exist:\n" +
+			"  • **Internal** (river-managed): omit `connection_settings`. " +
+			"Rivery allocates the S3 path automatically and injects STS credentials at runtime. " +
+			"The only creation requirement is `name`.\n" +
+			"  • **File-zone** (custom): include `connection_settings` pointing to a " +
+			"`boomi_data_integration_connection` that owns the customer's S3/GCS/Azure Blob bucket. " +
+			"The connection_settings block is the only field updatable in place.\n\n" +
+			"The API keys dataframes by `name` (no separate cross_id is returned). " +
+			"Changing the name forces a new dataframe — existing parquet files at the old S3 path are orphaned.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
-				Description:   "Resource id. Equals the dataframe name (the API keys dataframes by name).",
+				Description:   "Resource id — equals the dataframe name (the API uses name as the identifier).",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"environment_id": schema.StringAttribute{
@@ -66,29 +74,37 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"name": schema.StringAttribute{
 				Required: true,
-				Description: "Dataframe name. Must be unique within the environment. The API does not " +
-					"support renaming, so changing it forces a new dataframe.",
+				Description: "Dataframe name — must be unique within the environment and must match the " +
+					"import name used in the river's Python code (`from rivery_dataframes import <name>`). " +
+					"The API does not support renaming, so changing it forces a new dataframe.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"connection_settings": schema.SingleNestedAttribute{
 				Optional: true,
-				Description: "Storage connection settings for the dataframe's parquet files. The only " +
-					"field the API allows to be updated in place.",
+				Computed: true,
+				Description: "Storage connection for a file-zone (custom) dataframe. " +
+					"Omit this block to create an internal (river-managed) dataframe whose S3 path and " +
+					"credentials are managed by Rivery automatically. " +
+					"When present, this block is the only field the API allows to be updated in place.",
 				Attributes: map[string]schema.Attribute{
 					"connection": schema.StringAttribute{
-						Required:    true,
+						Optional:    true,
+						Computed:    true,
 						Description: "ID of the storage connection (cross-reference a boomi_data_integration_connection).",
 					},
 					"datasource_id": schema.StringAttribute{
-						Required:    true,
+						Optional:    true,
+						Computed:    true,
 						Description: "Datasource identifier of the connection (e.g. \"s3\", \"gcs\").",
 					},
 					"storage_type": schema.StringAttribute{
-						Required:    true,
+						Optional:    true,
+						Computed:    true,
 						Description: "Storage type (e.g. \"s3\", \"aws\", \"gcs\").",
 					},
 					"default_bucket": schema.StringAttribute{
-						Required:    true,
+						Optional:    true,
+						Computed:    true,
 						Description: "Default bucket the dataframe writes its parquet files to.",
 					},
 				},
@@ -209,9 +225,11 @@ func (r *dataFrameResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), envID)...)
 }
 
-// apply maps identity fields from an API response onto the model. The dataframe
-// is keyed by name, so the id mirrors the name. connection_settings is left as
-// configured (config-authoritative).
+// apply maps fields from an API response onto the model. The dataframe is keyed
+// by name so id mirrors name. connection_settings is mapped back from the API
+// when present (file-zone dataframes), enabling post-import state population and
+// drift detection. Internal dataframes have no connection_settings in the
+// API response — the block stays nil in that case.
 func (r *dataFrameResource) apply(api map[string]any, envID string, m *dataFrameModel) {
 	name := asString(api["name"])
 	if name == "" {
@@ -220,6 +238,19 @@ func (r *dataFrameResource) apply(api map[string]any, envID string, m *dataFrame
 	m.ID = types.StringValue(name)
 	m.Name = types.StringValue(name)
 	m.EnvironmentID = types.StringValue(envID)
+
+	// Read back connection_settings for file-zone dataframes. Internal
+	// dataframes return no connection_settings — leave the block nil.
+	if raw, ok := api["connection_settings"]; ok && raw != nil {
+		if cs, ok := raw.(map[string]any); ok && len(cs) > 0 {
+			m.ConnectionSettings = &dataFrameConnSettings{
+				Connection:    types.StringValue(asString(cs["connection"])),
+				DatasourceID:  types.StringValue(asString(cs["datasource_id"])),
+				StorageType:   types.StringValue(asString(cs["storage_type"])),
+				DefaultBucket: types.StringValue(asString(cs["default_bucket"])),
+			}
+		}
+	}
 }
 
 // connSettingsBody renders the typed nested block into the API's
