@@ -444,11 +444,14 @@ func (r *connectionResource) decodeParams(m connectionModel, diags *diag.Diagnos
 }
 
 // mergeParams copies type-specific params into the request body without
-// clobbering the reserved top-level keys.
+// clobbering reserved keys or keys already set by file_params uploads.
 func mergeParams(body, params map[string]any) {
 	for k, v := range params {
 		if k == "name" || k == "type" || k == "ssh_pkey_file_path" {
 			continue
+		}
+		if _, alreadySet := body[k]; alreadySet {
+			continue // file_params upload result takes priority
 		}
 		body[k] = v
 	}
