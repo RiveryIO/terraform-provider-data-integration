@@ -159,14 +159,17 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	// WriteOnly attributes are erased from the plan by the framework (they are never stored
-	// in state). Read parameters_json from the config so the credentials reach the API.
+	// in state). Read both write-only fields from the config so credentials reach the API.
+	var cfg connectionModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if plan.ParametersJSON.IsNull() || plan.ParametersJSON.IsUnknown() {
-		var cfg connectionModel
-		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 		plan.ParametersJSON = cfg.ParametersJSON
+	}
+	if plan.FileParams.IsNull() || plan.FileParams.IsUnknown() {
+		plan.FileParams = cfg.FileParams
 	}
 
 	envID := resolveEnvironmentID(plan.EnvironmentID.ValueString(), r.data)
@@ -252,14 +255,17 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 
 	// WriteOnly attributes are erased from the plan by the framework. Read
-	// parameters_json from the config so credentials are applied on updates too.
+	// both write-only fields from the config so credentials are applied on updates too.
+	var cfg connectionModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if plan.ParametersJSON.IsNull() || plan.ParametersJSON.IsUnknown() {
-		var cfg connectionModel
-		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 		plan.ParametersJSON = cfg.ParametersJSON
+	}
+	if plan.FileParams.IsNull() || plan.FileParams.IsUnknown() {
+		plan.FileParams = cfg.FileParams
 	}
 
 	envID := plan.EnvironmentID.ValueString()
