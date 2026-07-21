@@ -8,6 +8,7 @@ import (
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -48,6 +49,8 @@ type connectionModel struct {
 	ParametersJSON  jsontypes.Normalized `tfsdk:"parameters_json"`
 	FzConnectionID  types.String         `tfsdk:"fz_connection_id"`
 	ConnectionInfo  jsontypes.Normalized `tfsdk:"connection_info"`
+	FileParams      types.Map            `tfsdk:"file_params"`
+	FileParamPaths  types.Map            `tfsdk:"file_param_paths"`
 	SshPkeyFile     types.String         `tfsdk:"ssh_pkey_file"`
 	SshPkeyFilePath types.String         `tfsdk:"ssh_pkey_file_path"`
 }
@@ -106,20 +109,39 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"(e.g. username, warehouse, host, role). Populated automatically — " +
 					"do not set manually. Secret fields are never included.",
 			},
+			"file_params": schema.MapAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				ElementType: types.StringType,
+				Description: "Map of connection-body field name → local file path. For each entry the " +
+					"provider uploads the file via the connection-files API and injects the returned " +
+					"server-side path into the connection body under that field name. " +
+					"Use this for any credential file: Snowflake P8 keys, GCS/BQ service-account JSON, " +
+					"SSH keys, etc. The uploaded paths are stored in file_param_paths. " +
+					"Write-only: local paths are never stored in state.",
+			},
+			"file_param_paths": schema.MapAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Server-side paths returned after uploading the files in file_params. " +
+					"Keys match the field names from file_params. Populated automatically on " +
+					"Create/Update; read back from the API on refresh. Can be set explicitly to " +
+					"carry over paths from an imported connection without re-uploading.",
+			},
 			"ssh_pkey_file": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
-				Description: "Local path to a PEM private-key file used for SSH tunnel authentication. " +
-					"When set, the provider uploads the file on Create/Update via the connection-files API " +
-					"and stores the resulting server-side path in ssh_pkey_file_path. Write-only: never " +
-					"returned by the API, so this value is preserved from configuration and not refreshed.",
+				Optional:   true,
+				Sensitive:  true,
+				DeprecationMessage: "Use file_params = { ssh_pkey_file_path = \"<local path>\" } instead.",
+				Description: "Deprecated: use file_params. Local path to a PEM private-key file for " +
+					"SSH tunnel authentication. Uploads via the connection-files API and stores the " +
+					"server-side path in ssh_pkey_file_path.",
 			},
 			"ssh_pkey_file_path": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: "Server-side path of the uploaded SSH private-key file. " +
-					"Populated automatically when ssh_pkey_file is provided; read back from the API on refresh. " +
-					"Can also be set explicitly to carry over a path from an imported connection without re-uploading the key.",
+				Optional:           true,
+				Computed:           true,
+				DeprecationMessage: "Use file_param_paths instead.",
+				Description: "Deprecated: use file_param_paths. Server-side path of the uploaded SSH " +
+					"private-key file. Populated automatically when ssh_pkey_file is provided.",
 			},
 		},
 	}
@@ -154,9 +176,14 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	// Upload SSH key before creating so its path lands in the same body as
-	// credentials — a separate PATCH after creation would wipe secrets, because
-	// the API redacts them on GET (read-modify-write would overwrite with empty).
+	// Upload all credential files before creating — paths must land in the same
+	// body as parameters_json so secrets aren't wiped by a separate PATCH.
+	filePaths := uploadFileParams(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParams, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Legacy ssh_pkey_file support (deprecated — prefer file_params).
 	var sshFilePath string
 	if !plan.SshPkeyFile.IsNull() && !plan.SshPkeyFile.IsUnknown() {
 		fp, uploadErr := r.data.client.UploadConnectionFile(ctx, envID, plan.Type.ValueString(), plan.SshPkeyFile.ValueString())
@@ -173,10 +200,12 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
 		body["fz_connection_id"] = plan.FzConnectionID.ValueString()
 	}
+	for field, serverPath := range filePaths {
+		body[field] = serverPath
+	}
 	if sshFilePath != "" {
 		body["ssh_pkey_file_path"] = sshFilePath
 	} else if !plan.SshPkeyFilePath.IsNull() && !plan.SshPkeyFilePath.IsUnknown() {
-		// Allow explicitly carrying over a server-side path (e.g. copied from an import).
 		body["ssh_pkey_file_path"] = plan.SshPkeyFilePath.ValueString()
 	}
 	if params, ok := r.decodeParams(plan, &resp.Diagnostics); ok {
@@ -190,6 +219,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		addAPIError(&resp.Diagnostics, "Error creating connection", err)
 		return
 	}
+	primeFileParamPaths(&plan, filePaths, &resp.Diagnostics)
 	r.apply(created, envID, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -264,8 +294,13 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
-	// Upload SSH key before the PUT so its path is included in the same write
-	// as the credentials — avoids a second read-modify-write that would wipe secrets.
+	// Upload all credential files before the PUT — same atomicity requirement as Create.
+	filePaths := uploadFileParams(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParams, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Legacy ssh_pkey_file support (deprecated — prefer file_params).
 	var sshFilePath string
 	if !plan.SshPkeyFile.IsNull() && !plan.SshPkeyFile.IsUnknown() {
 		fp, uploadErr := r.data.client.UploadConnectionFile(ctx, envID, plan.Type.ValueString(), plan.SshPkeyFile.ValueString())
@@ -280,10 +315,12 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
 		patch["fz_connection_id"] = plan.FzConnectionID.ValueString()
 	}
+	for field, serverPath := range filePaths {
+		patch[field] = serverPath
+	}
 	if sshFilePath != "" {
 		patch["ssh_pkey_file_path"] = sshFilePath
 	} else if !plan.SshPkeyFilePath.IsNull() && !plan.SshPkeyFilePath.IsUnknown() {
-		// Preserve the existing server-side path when not re-uploading (e.g. after import).
 		patch["ssh_pkey_file_path"] = plan.SshPkeyFilePath.ValueString()
 	}
 	if hasParams {
@@ -295,6 +332,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		addAPIError(&resp.Diagnostics, "Error updating connection", err)
 		return
 	}
+	primeFileParamPaths(&plan, filePaths, &resp.Diagnostics)
 	r.apply(updated, envID, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -355,6 +393,25 @@ func (r *connectionResource) apply(api map[string]any, envID string, m *connecti
 	// SshPkeyFile is intentionally not updated here — it is write-only and never
 	// returned by the API, so it must be preserved from prior plan/state.
 
+	// Rebuild file_param_paths from the API response: any field that was uploaded
+	// via file_params will be present as a top-level key in the API response.
+	// We read them back so state tracks the current server-side paths.
+	if !m.FileParamPaths.IsNull() && !m.FileParamPaths.IsUnknown() {
+		existing := m.FileParamPaths.Elements()
+		refreshed := make(map[string]types.String, len(existing))
+		for field := range existing {
+			if v := asString(api[field]); v != "" {
+				refreshed[field] = types.StringValue(v)
+			}
+		}
+		rebuilt, mapDiags := types.MapValueFrom(context.Background(), types.StringType, refreshed)
+		diags.Append(mapDiags...)
+		m.FileParamPaths = rebuilt
+	} else {
+		m.FileParamPaths = types.MapValueMust(types.StringType, map[string]attr.Value{})
+	}
+	// FileParams is write-only (local paths) — never updated from API response.
+
 	// Build connection_info: full API response minus any secret fields.
 	safe := make(map[string]any, len(api))
 	for k, v := range api {
@@ -395,4 +452,59 @@ func mergeParams(body, params map[string]any) {
 		}
 		body[k] = v
 	}
+}
+
+// primeFileParamPaths seeds FileParamPaths on the model from a fresh upload result.
+// apply() will later refresh from the API response; this ensures the computed attribute
+// is never unknown after Create/Update even when the API echoes nothing back.
+func primeFileParamPaths(m *connectionModel, uploaded map[string]string, diags *diag.Diagnostics) {
+	if len(uploaded) == 0 {
+		if m.FileParamPaths.IsNull() || m.FileParamPaths.IsUnknown() {
+			m.FileParamPaths = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		}
+		return
+	}
+	vals := make(map[string]attr.Value, len(uploaded))
+	for k, v := range uploaded {
+		vals[k] = types.StringValue(v)
+	}
+	rebuilt, mapDiags := types.MapValue(types.StringType, vals)
+	diags.Append(mapDiags...)
+	if !diags.HasError() {
+		m.FileParamPaths = rebuilt
+	}
+}
+
+// uploadFileParams uploads each local file in the file_params map and returns
+// a map of field_name → server_side_path to be merged into the connection body.
+func uploadFileParams(
+	ctx context.Context,
+	client interface {
+		UploadConnectionFile(context.Context, string, string, string) (string, error)
+	},
+	envID, connType string,
+	fileParams types.Map,
+	diags *diag.Diagnostics,
+) map[string]string {
+	if fileParams.IsNull() || fileParams.IsUnknown() {
+		return nil
+	}
+	paths := make(map[string]string, len(fileParams.Elements()))
+	for field, val := range fileParams.Elements() {
+		localPath, ok := val.(types.String)
+		if !ok || localPath.IsNull() || localPath.IsUnknown() {
+			continue
+		}
+		serverPath, err := client.UploadConnectionFile(ctx, envID, connType, localPath.ValueString())
+		if err != nil {
+			diags.AddAttributeError(
+				path.Root("file_params"),
+				"Error uploading file for "+field,
+				err.Error(),
+			)
+			return nil
+		}
+		paths[field] = serverPath
+	}
+	return paths
 }
