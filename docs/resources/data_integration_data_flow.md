@@ -33,3 +33,4 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 ### Read-Only
 
 - `id` (String) Data flow ID (cross_id), assigned by the API.
+- `step_ids` (List of String) Stable step IDs for logic river steps, auto-generated on first create and preserved across updates. The provider injects these into the logic_steps array before each API write so step_id does not need to appear in properties_json. Positional: index 0 corresponds to the first step, index 1 to the second, etc. Non-logic rivers always have an empty list.

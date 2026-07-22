@@ -9,11 +9,13 @@ import (
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -44,6 +46,7 @@ type dataFlowModel struct {
 	SettingsJSON   jsontypes.Normalized `tfsdk:"settings_json"`
 	GroupID        types.String         `tfsdk:"group_id"`
 	Activate       types.Bool           `tfsdk:"activate"`
+	StepIDs        types.List           `tfsdk:"step_ids"`
 }
 
 func (r *dataFlowResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -126,6 +129,16 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"their first PUT, so setting activate = true here is the correct way to enable a " +
 					"freshly-created data flow.",
 			},
+			"step_ids": schema.ListAttribute{
+				ElementType: types.StringType,
+				Computed:    true,
+				Description: "Stable step IDs for logic river steps, auto-generated on first create " +
+					"and preserved across updates. The provider injects these into the logic_steps " +
+					"array before each API write so step_id does not need to appear in properties_json. " +
+					"Positional: index 0 corresponds to the first step, index 1 to the second, etc. " +
+					"Non-logic rivers always have an empty list.",
+				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
 		},
 	}
 }
@@ -148,7 +161,7 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	body, ok := r.buildBody(plan, &resp.Diagnostics)
+	body, ok := r.buildBody(plan, nil, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -206,7 +219,9 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	envID := plan.EnvironmentID.ValueString()
 
-	body, ok := r.buildBody(plan, &resp.Diagnostics)
+	// Inject stored step_ids so existing steps keep their IDs across updates.
+	// New steps (beyond the stored count) get no step_id — the API generates them.
+	body, ok := r.buildBody(plan, listToStepIDs(state.StepIDs), &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -278,7 +293,19 @@ func (r *dataFlowResource) Delete(ctx context.Context, req resource.DeleteReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.data.client.DeleteDataFlow(ctx, state.EnvironmentID.ValueString(), state.ID.ValueString()); err != nil {
+	envID := state.EnvironmentID.ValueString()
+	id := state.ID.ValueString()
+	// Disable before delete — the API rejects DELETE on an active data flow.
+	// DisableDataFlow is async; poll until done before issuing DELETE.
+	if opID, err := r.data.client.DisableDataFlow(ctx, envID, id); err != nil && !errors.Is(err, client.ErrNotFound) {
+		addAPIError(&resp.Diagnostics, "Error disabling data flow before delete", err)
+		return
+	} else if opID != "" {
+		if !r.waitForOp(ctx, envID, opID, &resp.Diagnostics) {
+			return
+		}
+	}
+	if err := r.data.client.DeleteDataFlow(ctx, envID, id); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
 			return
 		}
@@ -394,11 +421,12 @@ func (r *dataFlowResource) waitForOpWithTimeout(ctx context.Context, envID, opID
 	}
 }
 
-func (r *dataFlowResource) buildBody(plan dataFlowModel, diags *diag.Diagnostics) (map[string]any, bool) {
+func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags *diag.Diagnostics) (map[string]any, bool) {
 	props, ok := decodeJSONObject(plan.PropertiesJSON, path.Root("properties_json"), diags)
 	if !ok {
 		return nil, false
 	}
+	injectStepIDsIntoProps(props, stepIDs)
 	settings := map[string]any{}
 	if !plan.SettingsJSON.IsNull() && !plan.SettingsJSON.IsUnknown() {
 		s, ok := decodeJSONObject(plan.SettingsJSON, path.Root("settings_json"), diags)
@@ -458,6 +486,15 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 		m.GroupID = types.StringNull()
 	}
 
+	// Always read step_ids from the API response — the API is the source of truth.
+	// On create the API generates them; on update it echoes back what we injected.
+	if props, ok := api["properties"].(map[string]any); ok {
+		m.StepIDs = stepIDsToList(extractStepIDs(props))
+	}
+	if m.StepIDs.IsNull() || m.StepIDs.IsUnknown() {
+		m.StepIDs = stepIDsToList(nil)
+	}
+
 	// properties_json / settings_json are config-authoritative JSON passthrough.
 	// The API enriches them on write (logic_steps gain step_id/is_enabled/…,
 	// settings gains a notification block), so echoing the server value back
@@ -467,6 +504,8 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 	// import, where there is no prior config to honor.
 	if m.PropertiesJSON.IsNull() || m.PropertiesJSON.IsUnknown() {
 		if props, ok := api["properties"].(map[string]any); ok {
+			// Strip step_ids so imported properties_json matches what a user writes.
+			stripStepIDsFromProps(props)
 			if raw, err := json.Marshal(props); err == nil {
 				m.PropertiesJSON = jsontypes.NewNormalizedValue(string(raw))
 			} else {
@@ -497,3 +536,89 @@ func decodeJSONObject(v jsontypes.Normalized, attrPath path.Path, diags *diag.Di
 	}
 	return obj, true
 }
+
+// ── step_id helpers ───────────────────────────────────────────────────────────
+
+// injectStepIDsIntoProps writes the step_ids slice into the logic_steps array
+// inside props (the parsed properties object), overwriting any step_id already
+// present. No-op when props has no logic_steps or stepIDs is empty.
+func injectStepIDsIntoProps(props map[string]any, stepIDs []string) {
+	if len(stepIDs) == 0 {
+		return
+	}
+	steps, ok := props["logic_steps"].([]any)
+	if !ok {
+		return
+	}
+	for i, raw := range steps {
+		if i >= len(stepIDs) {
+			break
+		}
+		step, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		step["step_id"] = stepIDs[i]
+		steps[i] = step
+	}
+}
+
+// extractStepIDs reads the step_id from each step in a parsed properties object.
+func extractStepIDs(props map[string]any) []string {
+	steps, ok := props["logic_steps"].([]any)
+	if !ok || len(steps) == 0 {
+		return nil
+	}
+	ids := make([]string, len(steps))
+	for i, raw := range steps {
+		if step, ok := raw.(map[string]any); ok {
+			ids[i] = asString(step["step_id"])
+		}
+	}
+	return ids
+}
+
+// stripStepIDsFromProps removes step_id from every step — used on import so
+// properties_json stored in state matches what a user would write in config.
+func stripStepIDsFromProps(props map[string]any) {
+	steps, ok := props["logic_steps"].([]any)
+	if !ok {
+		return
+	}
+	for i, raw := range steps {
+		if step, ok := raw.(map[string]any); ok {
+			delete(step, "step_id")
+			steps[i] = step
+		}
+	}
+}
+
+// stepIDsToList converts a []string into a types.List of StringType elements.
+func stepIDsToList(ids []string) types.List {
+	if len(ids) == 0 {
+		v, _ := types.ListValue(types.StringType, []attr.Value{})
+		return v
+	}
+	elems := make([]attr.Value, len(ids))
+	for i, id := range ids {
+		elems[i] = types.StringValue(id)
+	}
+	v, _ := types.ListValue(types.StringType, elems)
+	return v
+}
+
+// listToStepIDs converts a types.List of strings back to []string.
+func listToStepIDs(l types.List) []string {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	elems := l.Elements()
+	ids := make([]string, len(elems))
+	for i, e := range elems {
+		if s, ok := e.(types.String); ok {
+			ids[i] = s.ValueString()
+		}
+	}
+	return ids
+}
+

@@ -25,12 +25,14 @@ A Data Integration connection to a data source or target.
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `environment_id` (String) Environment this connection belongs to. Falls back to the provider-level environment_id. Changing it forces a new connection.
+- `file_params` (Map of String, Sensitive) Map of connection-body field name → local file path. For each entry the provider uploads the file via the connection-files API and injects the returned server-side path into the connection body under that field name. Use this for any credential file: Snowflake P8 keys, GCS/BQ service-account JSON, SSH keys, etc. The uploaded paths are stored in file_param_paths. Write-only: local paths are never stored in state.
 - `fz_connection_id` (String) Cross-ID of the file-zone staging connection linked to this connection.
 - `parameters_json` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
-- `ssh_pkey_file` (String, Sensitive) Local path to a PEM private-key file used for SSH tunnel authentication. When set, the provider uploads the file on Create/Update via the connection-files API and stores the resulting server-side path in ssh_pkey_file_path. Write-only: never returned by the API, so this value is preserved from configuration and not refreshed.
-- `ssh_pkey_file_path` (String) Server-side path of the uploaded SSH private-key file. Populated automatically when ssh_pkey_file is provided; read back from the API on refresh. Can also be set explicitly to carry over a path from an imported connection without re-uploading the key.
+- `ssh_pkey_file` (String, Sensitive, Deprecated) Deprecated: use file_params. Local path to a PEM private-key file for SSH tunnel authentication. Uploads via the connection-files API and stores the server-side path in ssh_pkey_file_path.
+- `ssh_pkey_file_path` (String, Deprecated) Deprecated: use file_param_paths. Server-side path of the uploaded SSH private-key file. Populated automatically when ssh_pkey_file is provided.
 
 ### Read-Only
 
 - `connection_info` (String) Non-sensitive fields returned by the API on every read (e.g. username, warehouse, host, role). Populated automatically — do not set manually. Secret fields are never included.
+- `file_param_paths` (Map of String) Server-side paths returned after uploading the files in file_params. Keys match the field names from file_params. Populated automatically on Create/Update; read back from the API on refresh. Can be set explicitly to carry over paths from an imported connection without re-uploading.
 - `id` (String) Connection ID, assigned by the API.
