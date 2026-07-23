@@ -18,7 +18,7 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 ### Required
 
 - `name` (String) Data flow name.
-- `properties_json` (String) The river properties object as JSON — must include a properties_type discriminator and (for logic flows) a non-empty logic_steps array. This value is config-authoritative: the API enriches it on write (logic_steps gain step_id/is_enabled/…), so the provider keeps your configured value and does not refresh it from the API. Drift inside this blob is therefore not detected.
+- `properties_json` (String) The river properties object as JSON — must include a properties_type discriminator and (for logic flows) a non-empty logic_steps array. This value is config-authoritative: the API enriches it on write (logic_steps gain step_id/is_enabled/…), so the provider keeps your configured value and does not refresh it from the API. Drift inside this blob is therefore not detected. NATIVE CONNECTORS (run_type="multi_tables", is_native — e.g. github): their required Source Settings live under source.additional_settings.interface_parameters.source[] and are NOT validated by this provider. Discover the mandatory ones with GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry in cross_reports_predefined[] with "required": true must be supplied (e.g. github requires organization AND repositories). See the buildBody note for the value-format rules and how to verify.
 - `type` (String) River type. One of: "source_to_target", "logic", "actions", "connector_executor".
 
 ### Optional
@@ -28,6 +28,7 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.
 - `kind` (String) River kind. Defaults to "main_river".
+- `schedulers_json` (String) The river schedule as a JSON array, sent top-level as "schedulers". Each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC river without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for non-CDC flows. Config-authoritative like properties_json/settings_json: the provider keeps your configured value and does not refresh it from the API.
 - `settings_json` (String) The river settings object as JSON. Defaults to an empty object. Config-authoritative like properties_json (the API adds a notification block on write); the provider does not refresh it from the API.
 
 ### Read-Only
