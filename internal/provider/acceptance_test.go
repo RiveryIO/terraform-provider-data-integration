@@ -55,9 +55,9 @@ func TestAccEnvironmentResource(t *testing.T) {
 // flow, the resource where read shape ≠ write shape — the import-verify step is
 // the load-bearing check that normalization keeps plans clean.
 func TestAccDataFlowResource(t *testing.T) {
-	subRiverID := os.Getenv("RIVERY_ACC_SUBRIVER_ID")
+	subRiverID := os.Getenv("RIVERY_ACC_SUB_DATA_FLOW_ID")
 	if subRiverID == "" {
-		t.Skip("RIVERY_ACC_SUBRIVER_ID not set — a real river_id is required for a logic leaf step")
+		t.Skip("RIVERY_ACC_SUB_DATA_FLOW_ID not set — a real data_flow_id is required for a logic leaf step")
 	}
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -240,7 +240,7 @@ resource "boomi_data_integration_data_flow" "test" {
     logic_steps = [{
       type            = "river"
       name            = "step-1"
-      river_id        = %q
+      data_flow_id    = %q
       input_variables = {}
     }]
   })

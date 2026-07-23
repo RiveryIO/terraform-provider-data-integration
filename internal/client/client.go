@@ -740,40 +740,40 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 // without double-encrypting — enabling read-modify-write cycles without decryption.
 // There is no decrypt API.
 
-// RiverVariableSettings holds the per-variable metadata flags.
-type RiverVariableSettings struct {
+// DataFlowVariableSettings holds the per-variable metadata flags.
+type DataFlowVariableSettings struct {
 	ClearValueOnStart bool `json:"clear_value_on_start"`
 	IsMultiValue      bool `json:"is_multi_value"`
 	IsEncrypted       bool `json:"is_encrypted"`
 }
 
-// RiverVariable is a single item in the river variables collection.
+// DataFlowVariable is a single item in the river variables collection.
 // Value is any because the API returns a string for single/encrypted vars and
 // a []any for multi-value vars.
 type RiverVariable struct {
 	Name     string                `json:"name"`
-	Settings RiverVariableSettings `json:"settings"`
+	Settings DataFlowVariableSettings `json:"settings"`
 	Value    any                   `json:"value"`
 }
 
-type riverVariablesPage struct {
+type dataFlowVariablesPage struct {
 	Items []RiverVariable `json:"items"`
 }
 
-// ListRiverVariables returns all variables for a river.
-func (c *Client) ListRiverVariables(ctx context.Context, environmentID, riverID string) ([]RiverVariable, error) {
-	var out riverVariablesPage
+// ListDataFlowVariables returns all variables for a river.
+func (c *Client) ListDataFlowVariables(ctx context.Context, environmentID, riverID string) ([]RiverVariable, error) {
+	var out dataFlowVariablesPage
 	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
 }
 
-// PutRiverVariables replaces the full variable list for a river. Pass an empty slice
+// PutDataFlowVariables replaces the full variable list for a river. Pass an empty slice
 // to delete all variables.
-func (c *Client) PutRiverVariables(ctx context.Context, environmentID, riverID string, items []RiverVariable) ([]RiverVariable, error) {
+func (c *Client) PutDataFlowVariables(ctx context.Context, environmentID, riverID string, items []RiverVariable) ([]RiverVariable, error) {
 	body := map[string]any{"items": items}
-	var out riverVariablesPage
+	var out dataFlowVariablesPage
 	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), body, &out); err != nil {
 		return nil, err
 	}
@@ -880,7 +880,7 @@ func (c *Client) ListSourceTypes(ctx context.Context) ([]map[string]any, error) 
 
 // ---- River groups ----------------------------------------------------------
 
-// RiverGroup is the normalised view of a river group returned by the v1 API.
+// DataFlowGroup is the normalised view of a river group returned by the v1 API.
 type RiverGroup struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -889,10 +889,10 @@ type RiverGroup struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// ListRiverGroups returns every river group in the environment. The v1 API
+// ListDataFlowGroups returns every river group in the environment. The v1 API
 // exposes GET only for groups; creation/mutation is UI-only (allow_from_api=false
 // on the internal route). This method pages until exhausted.
-func (c *Client) ListRiverGroups(ctx context.Context, environmentID string) ([]RiverGroup, error) {
+func (c *Client) ListDataFlowGroups(ctx context.Context, environmentID string) ([]RiverGroup, error) {
 	var all []RiverGroup
 	for page := 1; ; page++ {
 		var resp struct {

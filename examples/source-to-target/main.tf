@@ -154,6 +154,6 @@ variable "s3_region" {
   default = "us-east-2"
 }
 
-output "river_id" {
+output "data_flow_id" {
   value = boomi_data_flow.mysql_to_postgres.id
 }

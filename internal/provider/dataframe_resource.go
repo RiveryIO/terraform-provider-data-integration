@@ -75,7 +75,7 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				Required: true,
 				Description: "Dataframe name — must be unique within the environment and must match the " +
-					"import name used in the river's Python code (`from rivery_dataframes import <name>`). " +
+					"import name used in the data flow's Python code (`from rivery_dataframes import <name>`). " +
 					"The API does not support renaming, so changing it forces a new dataframe.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},

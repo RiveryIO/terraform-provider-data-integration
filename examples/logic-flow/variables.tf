@@ -35,7 +35,7 @@ variable "river_name" {
   default     = "TF_logic_multistep"
 }
 
-variable "sub_river_id" {
+variable "sub_data_flow_id" {
   type        = string
   description = "cross_id of an existing river to run as the first (river) step."
 }

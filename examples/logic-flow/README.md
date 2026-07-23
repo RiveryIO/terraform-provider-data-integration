@@ -18,7 +18,7 @@ config emits the exact step shapes the API accepts:
   "properties_type": "logic",
   "logic_steps": [{
     "type": "run_once", "name": "pipeline", "is_parallel": false, "steps": [
-      { "type": "river", "river_id": "<cross_id>", "input_variables": {} },
+      { "type": "river", "data_flow_id": "<cross_id>", "input_variables": {} },
       { "type": "logicode", "code_type": "python", "file_id": "<file_id>", "logicode_size": "XS", "additional_packages": [] },
       { "type": "snowflake_sql_query", "connection_id": "<conn>", "sql_query": "...",
         "target_settings": { "target_type": "table", "database_name": "...", "schema_name": "...", "table_name": "...", "loading_mode": "overwrite" } }
@@ -50,7 +50,7 @@ terraform apply \
   -var "account_id=$DATA_INTEGRATION_ACCOUNT_ID" \
   -var "environment_id=$DATA_INTEGRATION_ENVIRONMENT_ID" \
   -var "group_id=<env_group_cross_id>" \
-  -var "sub_river_id=<cross_id of a river to orchestrate>" \
+  -var "sub_data_flow_id=<cross_id of a river to orchestrate>" \
   -var "sf_account_name=<snowflake_account>" \
   -var "sf_username=<user>" -var "sf_password=<pass>" \
   -var "sf_target_database=<db>"

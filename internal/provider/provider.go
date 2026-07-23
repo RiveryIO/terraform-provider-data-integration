@@ -141,9 +141,10 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 		NewDataFlowResource,
 		NewDataFlowRunResource,
 		NewDataFrameResource,
+		NewFileResource,
 		NewLogicodeFileResource,
 		NewVariableResource,
-		NewRiverVariablesResource,
+		NewDataFlowVariablesResource,
 		NewCDCConfigResource,
 	}
 }
@@ -154,7 +155,7 @@ func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() dataso
 		NewConnectionTypeDataSource,
 		NewSourceTypesDataSource,
 		NewTargetTypesDataSource,
-		NewRiverGroupDataSource,
+		NewDataFlowGroupDataSource,
 	}
 }
 

@@ -65,7 +65,7 @@ resource "boomi_data_integration_data_flow" "s2t" {
   group_id = var.group_id
 }
 
-output "river_id" {
+output "data_flow_id" {
   value = boomi_data_integration_data_flow.s2t.id
 }
 

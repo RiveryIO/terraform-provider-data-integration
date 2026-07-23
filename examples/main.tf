@@ -50,7 +50,7 @@ resource "boomi_data_integration_data_flow" "daily_load" {
       {
         type            = "river"
         name            = "load-step"
-        river_id        = var.sub_river_id
+        river_id        = var.sub_data_flow_id
         input_variables = {}
       }
     ]
@@ -63,7 +63,7 @@ variable "snowflake_password" {
   default   = ""
 }
 
-variable "sub_river_id" {
+variable "sub_data_flow_id" {
   type        = string
   description = "cross_id of an existing river used as the logic leaf step"
   default     = ""

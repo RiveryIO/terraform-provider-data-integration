@@ -56,7 +56,7 @@ locals {
   river_step = {
     name            = "run-s2t-subriver"
     type            = "river"
-    river_id        = var.sub_river_id
+    river_id        = var.sub_data_flow_id
     input_variables = {}
     is_enabled      = true
     disable_errors  = false
@@ -123,7 +123,7 @@ resource "boomi_data_integration_data_flow" "logic" {
   })
 }
 
-output "logic_river_id" {
+output "logic_data_flow_id" {
   description = "cross_id of the created logic river."
   value       = boomi_data_integration_data_flow.logic.id
 }
