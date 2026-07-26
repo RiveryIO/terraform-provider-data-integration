@@ -888,6 +888,78 @@ func (c *Client) TestConnection(ctx context.Context, environmentID string, body 
 	return res, nil
 }
 
+// ---- Source metadata discovery (get_db_metadata pull request) --------------
+//
+// The console's mapping tab discovers a source's schema/columns by asking the
+// worker fleet to introspect the connection — the same get_db_metadata "pull
+// request" the connection test uses, but here we keep the operation's result
+// payload. The result is the nested {schema:{table:{columns:[...]}}} shape the
+// discover_schema.py helper parses. RDBMS sources only; native/SaaS connectors
+// route metadata differently (TODO).
+
+// SourceMetadataResult is the terminal outcome of a get_db_metadata pull request,
+// carrying the discovered metadata payload on success.
+type SourceMetadataResult struct {
+	OperationID  string
+	RunID        string
+	Status       string // "D" done, "E" error, or the last polled state
+	ErrorMessage string
+	// Result is the raw operation.result — the nested
+	// {schema:{table:{columns:[...]}}} discovery payload (nil unless Status=="D").
+	Result map[string]any
+}
+
+// DiscoverSourceMetadata creates a get_db_metadata pull request (POST
+// /pull_requests) and polls the resulting operation to a terminal state,
+// returning the operation's result payload on success. body is the
+// BasePullRequestSchema object (task_type / datasource_id / task:"get_db_metadata"
+// / pull_request_inputs). Poll status values are "W" (working), "R" (running),
+// "D" (done), "E" (error).
+func (c *Client) DiscoverSourceMetadata(ctx context.Context, environmentID string, body map[string]any, pollInterval, timeout time.Duration) (SourceMetadataResult, error) {
+	var created struct {
+		OperationID  string  `json:"operation_id"`
+		RunID        string  `json:"run_id"`
+		Status       string  `json:"status"`
+		ErrorMessage *string `json:"error_message"`
+	}
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/pull_requests"), body, &created); err != nil {
+		return SourceMetadataResult{}, err
+	}
+	res := SourceMetadataResult{OperationID: created.OperationID, RunID: created.RunID, Status: created.Status}
+	if created.ErrorMessage != nil {
+		res.ErrorMessage = *created.ErrorMessage
+	}
+	if res.OperationID == "" {
+		return res, fmt.Errorf("pull request did not return an operation_id")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for res.Status == "W" || res.Status == "R" || res.Status == "" {
+		if time.Now().After(deadline) {
+			return res, fmt.Errorf("source metadata discovery timed out after %s (operation %s still %q)", timeout, res.OperationID, res.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		var op map[string]any
+		if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/operations/"+res.OperationID), nil, &op); err != nil {
+			return res, err
+		}
+		res.Status, _ = op["status"].(string)
+		if msg, _ := op["error_message"].(string); msg != "" {
+			res.ErrorMessage = msg
+		}
+		if res.Status == "D" {
+			if r, ok := op["result"].(map[string]any); ok {
+				res.Result = r
+			}
+		}
+	}
+	return res, nil
+}
+
 // EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
 // the river. Must be called after the river is updated to extract_method=log and
 // before the first CDC run. Returns the async operation id (empty = synchronous).
