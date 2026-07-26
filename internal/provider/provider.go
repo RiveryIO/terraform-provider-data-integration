@@ -153,6 +153,7 @@ func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() dataso
 		NewConnectionTypesDataSource,
 		NewConnectionTypeDataSource,
 		NewConnectionTestDataSource,
+		NewSourceMetadataDataSource,
 		NewSourceTypesDataSource,
 		NewTargetTypesDataSource,
 		NewRiverGroupDataSource,
