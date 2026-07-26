@@ -44,6 +44,7 @@ type dataFlowModel struct {
 	Description    types.String         `tfsdk:"description"`
 	PropertiesJSON jsontypes.Normalized `tfsdk:"properties_json"`
 	SettingsJSON   jsontypes.Normalized `tfsdk:"settings_json"`
+	SchedulersJSON jsontypes.Normalized `tfsdk:"schedulers_json"`
 	GroupID        types.String         `tfsdk:"group_id"`
 	Activate       types.Bool           `tfsdk:"activate"`
 	StepIDs        types.List           `tfsdk:"step_ids"`
@@ -99,7 +100,14 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"discriminator and (for logic flows) a non-empty logic_steps array. This value " +
 					"is config-authoritative: the API enriches it on write (logic_steps gain " +
 					"step_id/is_enabled/…), so the provider keeps your configured value and does not " +
-					"refresh it from the API. Drift inside this blob is therefore not detected.",
+					"refresh it from the API. Drift inside this blob is therefore not detected. " +
+					"NATIVE CONNECTORS (run_type=\"multi_tables\", is_native — e.g. github): their " +
+					"required Source Settings live under source.additional_settings.interface_parameters." +
+					"source[] and are NOT validated by this provider. Discover the mandatory ones with " +
+					"GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry " +
+					"in cross_reports_predefined[] with \"required\": true must be supplied (e.g. github " +
+					"requires organization AND repositories). See the buildBody note for the value-format " +
+					"rules and how to verify.",
 			},
 			"settings_json": schema.StringAttribute{
 				Optional:   true,
@@ -109,6 +117,18 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "The river settings object as JSON. Defaults to an empty object. " +
 					"Config-authoritative like properties_json (the API adds a notification block " +
 					"on write); the provider does not refresh it from the API.",
+			},
+			"schedulers_json": schema.StringAttribute{
+				Optional:   true,
+				CustomType: jsontypes.NormalizedType{},
+				Description: "The river schedule as a JSON array, sent top-level as \"schedulers\". " +
+					"Each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
+					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
+					"river without an enabled scheduler (\"Please schedule a CDC data flow before enabling " +
+					"or creating\"), and the cron must run between once per day and 12 times per hour " +
+					"(i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for " +
+					"non-CDC flows. Config-authoritative like properties_json/settings_json: the provider " +
+					"keeps your configured value and does not refresh it from the API.",
 			},
 			"group_id": schema.StringAttribute{
 				Optional: true,
@@ -233,13 +253,18 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		!isCDCFlow(state.PropertiesJSON.ValueString())
 
 	if switchingToCDC {
-		current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
-		if err != nil {
-			addAPIError(&resp.Diagnostics, "Error fetching data flow schedulers for CDC transition", err)
-			return
-		}
-		if schedulers, ok := current["schedulers"]; ok {
-			body["schedulers"] = schedulers
+		// When the config supplies schedulers_json, buildBody has already set it and
+		// that takes precedence. Otherwise fall back to the schedulers currently on
+		// the river so the CDC validator still passes.
+		if _, hasSchedulers := body["schedulers"]; !hasSchedulers {
+			current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
+			if err != nil {
+				addAPIError(&resp.Diagnostics, "Error fetching data flow schedulers for CDC transition", err)
+				return
+			}
+			if schedulers, ok := current["schedulers"]; ok {
+				body["schedulers"] = schedulers
+			}
 		}
 	}
 
@@ -452,6 +477,41 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	if !plan.GroupID.IsNull() && !plan.GroupID.IsUnknown() && plan.GroupID.ValueString() != "" {
 		body["group_id"] = plan.GroupID.ValueString()
 	}
+	// schedulers is a top-level list on the write body. It is mandatory for CDC
+	// (log-based) flows — the API validates that an enabled scheduler is present
+	// before it will create or enable a CDC river.
+	//
+	// NATIVE-CONNECTOR SOURCE SETTINGS (verify checklist) — properties_json is
+	// opaque to this provider, so nothing here validates that a native connector's
+	// required "Source Settings" are present. They are the fields the console shows
+	// under "Source Settings — Connector settings applied to every report" (marked
+	// with a red *). A river created without them saves fine but is unusable (the UI
+	// shows the required dropdowns empty; a run has no scope). To author one correctly:
+	//
+	//  1. Identify a native connector: its data_source_types entry has is_native=true
+	//     and feature_flags.run_types=["multi_tables"]; in properties_json the source
+	//     is name="native_connector" with additional_settings.nc_id/nc_version set.
+	//  2. Discover the required settings:
+	//       GET .../data_source_properties/global_properties?datasource_id=<slug>
+	//     Each cross_reports_predefined[] descriptor with "required": true is
+	//     mandatory. (GitHub → organization AND repositories.)
+	//  3. Supply every required descriptor under:
+	//       source.additional_settings.interface_parameters.source = [{name,type,value}]
+	//     - name MUST equal the descriptor's name exactly (a mismatch = the console
+	//       dropdown renders empty even though the value was saved).
+	//     - value format follows the descriptor type: list_api_single_id →
+	//       one API-resolved id, list_api_multiple_id → a list of API-resolved ids
+	//       (NOT raw display strings), input_text → the literal string.
+	//  4. Verify: after apply, GET the river and confirm interface_parameters.source
+	//     round-trips, and that the console Source tab pre-selects the values (not
+	//     "Select..."). A test-connection on the source connection is recommended too.
+	if !plan.SchedulersJSON.IsNull() && !plan.SchedulersJSON.IsUnknown() {
+		schedulers, ok := decodeJSONArray(plan.SchedulersJSON, path.Root("schedulers_json"), diags)
+		if !ok {
+			return nil, false
+		}
+		body["schedulers"] = schedulers
+	}
 	return body, true
 }
 
@@ -522,6 +582,18 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
+	// schedulers_json is Optional (not Computed), so an unset config is null. Only
+	// seed it from the API when it is null AND the river actually carries a
+	// scheduler — i.e. on import. Never populate from an empty API list, which
+	// would turn a legitimately-null config into "[]" and break plan==apply
+	// consistency on create.
+	if m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown() {
+		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
+			if raw, err := json.Marshal(schedulers); err == nil {
+				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))
+			}
+		}
+	}
 	return diags
 }
 
@@ -535,6 +607,18 @@ func decodeJSONObject(v jsontypes.Normalized, attrPath path.Path, diags *diag.Di
 		return nil, false
 	}
 	return obj, true
+}
+
+// decodeJSONArray parses a Normalized JSON string into a slice, appending a
+// diagnostic at attrPath when it is not a JSON array.
+func decodeJSONArray(v jsontypes.Normalized, attrPath path.Path, diags *diag.Diagnostics) ([]any, bool) {
+	var arr []any
+	if err := json.Unmarshal([]byte(v.ValueString()), &arr); err != nil {
+		diags.AddAttributeError(attrPath, "Invalid JSON array",
+			fmt.Sprintf("%s must be a JSON array: %s", attrPath, err))
+		return nil, false
+	}
+	return arr, true
 }
 
 // ── step_id helpers ───────────────────────────────────────────────────────────
@@ -621,4 +705,3 @@ func listToStepIDs(l types.List) []string {
 	}
 	return ids
 }
-
