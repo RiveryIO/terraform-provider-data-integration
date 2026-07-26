@@ -826,6 +826,68 @@ func (c *Client) GetOperation(ctx context.Context, environmentID, operationID st
 	return status, errMsg, nil
 }
 
+// ---- Connection test (pull-request driven) ---------------------------------
+//
+// The API has no dedicated "test connection" route. The console tests a
+// connection by asking the worker fleet (rivery_back) to actually connect to
+// the source/target and read its metadata — a "pull request". A get_db_metadata
+// (or get_schemas / get_databases) pull request opens a real connection, so a
+// Done result proves reachability + credentials and an Error result carries the
+// real connector error (e.g. ORA-12547 when a TLS-only Autonomous DB rejects a
+// plaintext connect). This is exactly what the connection-test data source uses.
+
+// ConnectionTestResult is the terminal outcome of a connection-test pull request.
+type ConnectionTestResult struct {
+	OperationID  string
+	RunID        string
+	Status       string // "D" done/reachable, "E" error, or the last polled state
+	ErrorMessage string
+}
+
+// TestConnection creates a pull request (POST /pull_requests) and polls the
+// resulting operation to a terminal state. body is the BasePullRequestSchema
+// object (task_type / datasource_id / task / pull_request_inputs). Poll status
+// values are "W" (working), "R" (running), "D" (done), "E" (error).
+func (c *Client) TestConnection(ctx context.Context, environmentID string, body map[string]any, pollInterval, timeout time.Duration) (ConnectionTestResult, error) {
+	var created struct {
+		OperationID  string  `json:"operation_id"`
+		RunID        string  `json:"run_id"`
+		Status       string  `json:"status"`
+		ErrorMessage *string `json:"error_message"`
+	}
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/pull_requests"), body, &created); err != nil {
+		return ConnectionTestResult{}, err
+	}
+	res := ConnectionTestResult{OperationID: created.OperationID, RunID: created.RunID, Status: created.Status}
+	if created.ErrorMessage != nil {
+		res.ErrorMessage = *created.ErrorMessage
+	}
+	if res.OperationID == "" {
+		return res, fmt.Errorf("pull request did not return an operation_id")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for res.Status == "W" || res.Status == "R" || res.Status == "" {
+		if time.Now().After(deadline) {
+			return res, fmt.Errorf("connection test timed out after %s (operation %s still %q)", timeout, res.OperationID, res.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		status, errMsg, err := c.GetOperation(ctx, environmentID, res.OperationID)
+		if err != nil {
+			return res, err
+		}
+		res.Status = status
+		if errMsg != "" {
+			res.ErrorMessage = errMsg
+		}
+	}
+	return res, nil
+}
+
 // EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
 // the river. Must be called after the river is updated to extract_method=log and
 // before the first CDC run. Returns the async operation id (empty = synchronous).
