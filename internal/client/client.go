@@ -968,7 +968,7 @@ func (c *Client) DiscoverSourceMetadata(ctx context.Context, environmentID strin
 // mechanic as source discovery, but with task_type:"target" and a per-warehouse
 // task verb. Unlike source get_db_metadata (a nested object), the target result
 // is typically a flat JSON array (e.g. snowflake get_databases ->
-// ["AARON","RIVERY_DEMO",...]); bigquery/databricks may return an array of
+// ["ANALYTICS","RAW_DATA",...]); bigquery/databricks may return an array of
 // objects, so the result is kept as the raw decoded value.
 
 // TargetMetadataResult is the terminal outcome of a target-metadata pull request,

@@ -43,11 +43,11 @@ func TestTargetTasksMapping(t *testing.T) {
 func TestExtractNameStrings(t *testing.T) {
 	// Snowflake get_databases: a flat JSON array of strings.
 	var flat any
-	if err := json.Unmarshal([]byte(`["AARON","RIVERY_DEMO","SNOWFLAKE_SAMPLE_DATA"]`), &flat); err != nil {
+	if err := json.Unmarshal([]byte(`["ANALYTICS","RAW_DATA","STAGING"]`), &flat); err != nil {
 		t.Fatalf("unmarshal flat: %v", err)
 	}
 	got := extractNameStrings(flat)
-	want := []string{"AARON", "RIVERY_DEMO", "SNOWFLAKE_SAMPLE_DATA"}
+	want := []string{"ANALYTICS", "RAW_DATA", "STAGING"}
 	if len(got) != len(want) {
 		t.Fatalf("flat: got %d names %v, want %d", len(got), got, len(want))
 	}
