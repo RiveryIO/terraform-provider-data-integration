@@ -960,6 +960,78 @@ func (c *Client) DiscoverSourceMetadata(ctx context.Context, environmentID strin
 	return res, nil
 }
 
+// ---- Target metadata discovery (get_databases/get_datasets/get_catalogs) ----
+//
+// The console's target-mapping picker lists a warehouse's top-level containers
+// (Snowflake databases, BigQuery datasets, Databricks catalogs) by asking the
+// worker fleet to introspect the TARGET connection — the same "pull request"
+// mechanic as source discovery, but with task_type:"target" and a per-warehouse
+// task verb. Unlike source get_db_metadata (a nested object), the target result
+// is typically a flat JSON array (e.g. snowflake get_databases ->
+// ["ANALYTICS","RAW_DATA",...]); bigquery/databricks may return an array of
+// objects, so the result is kept as the raw decoded value.
+
+// TargetMetadataResult is the terminal outcome of a target-metadata pull request,
+// carrying the discovered listing payload on success.
+type TargetMetadataResult struct {
+	OperationID  string
+	RunID        string
+	Status       string // "D" done, "E" error, or the last polled state
+	ErrorMessage string
+	// Result is the raw operation.result — for target discovery usually a
+	// []any of database/dataset/catalog names (nil unless Status=="D").
+	Result any
+}
+
+// DiscoverTargetMetadata creates a target-metadata pull request (POST
+// /pull_requests) and polls the resulting operation to a terminal state,
+// returning the operation's result payload on success. body is the
+// BasePullRequestSchema object (task_type:"target" / datasource_id / task
+// (get_databases|get_datasets|get_catalogs) / pull_request_inputs). Poll status
+// values are "W" (working), "R" (running), "D" (done), "E" (error).
+func (c *Client) DiscoverTargetMetadata(ctx context.Context, environmentID string, body map[string]any, pollInterval, timeout time.Duration) (TargetMetadataResult, error) {
+	var created struct {
+		OperationID  string  `json:"operation_id"`
+		RunID        string  `json:"run_id"`
+		Status       string  `json:"status"`
+		ErrorMessage *string `json:"error_message"`
+	}
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/pull_requests"), body, &created); err != nil {
+		return TargetMetadataResult{}, err
+	}
+	res := TargetMetadataResult{OperationID: created.OperationID, RunID: created.RunID, Status: created.Status}
+	if created.ErrorMessage != nil {
+		res.ErrorMessage = *created.ErrorMessage
+	}
+	if res.OperationID == "" {
+		return res, fmt.Errorf("pull request did not return an operation_id")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for res.Status == "W" || res.Status == "R" || res.Status == "" {
+		if time.Now().After(deadline) {
+			return res, fmt.Errorf("target metadata discovery timed out after %s (operation %s still %q)", timeout, res.OperationID, res.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		var op map[string]any
+		if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/operations/"+res.OperationID), nil, &op); err != nil {
+			return res, err
+		}
+		res.Status, _ = op["status"].(string)
+		if msg, _ := op["error_message"].(string); msg != "" {
+			res.ErrorMessage = msg
+		}
+		if res.Status == "D" {
+			res.Result = op["result"]
+		}
+	}
+	return res, nil
+}
+
 // EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
 // the river. Must be called after the river is updated to extract_method=log and
 // before the first CDC run. Returns the async operation id (empty = synchronous).
