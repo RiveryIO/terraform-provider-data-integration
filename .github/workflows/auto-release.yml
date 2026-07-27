@@ -1,0 +1,158 @@
+# Auto Release workflow.
+#
+# On every merge to `main`, computes the next semantic version from the
+# conventional-commit messages since the last `v*` tag, creates and pushes the
+# tag, then invokes the Release workflow (release.yml, via workflow_call) to run
+# GoReleaser and publish the GitHub Release.
+#
+# Why call release.yml directly instead of just pushing a tag?
+#   A tag pushed with the default GITHUB_TOKEN does NOT trigger other workflows
+#   (GitHub prevents recursive Actions runs). So a plain "create tag" step would
+#   never fire release.yml's `push: tags` trigger. Rather than introduce a PAT
+#   secret, we create the tag and then call the release workflow in the same run
+#   (`uses: ./.github/workflows/release.yml`). Self-contained, no extra secret.
+#
+# Bump rules (commits in <last v* tag>..HEAD):
+#   - a `!` after the type (e.g. `feat!:`) or `BREAKING CHANGE` in a body -> MAJOR
+#   - `feat:`                                                             -> MINOR
+#   - everything else (fix, perf, chore, docs, refactor, test, ci, ...)   -> PATCH
+#   We default to PATCH so every merge is releasable. MAJOR wins over MINOR
+#   wins over PATCH.
+#
+# Escape hatches (never fail the pipeline for a no-op):
+#   - No commits since the last tag  -> log + exit 0, no release.
+#   - Latest commit contains `[skip release]` -> log + exit 0, no release.
+
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+# Serialize releases: if two merges land close together, run them one at a time
+# so we never compute/push two tags concurrently or double-release.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+# Only the contents scope is needed (to push the tag). The reusable Release
+# workflow inherits this and uses it to create the GitHub Release.
+permissions:
+  contents: write
+
+jobs:
+  compute-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.bump.outputs.release }}
+      new_tag: ${{ steps.bump.outputs.new_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version from conventional commits
+        id: bump
+        run: |
+          set -euo pipefail
+
+          # Latest merge/push commit message (subject + body).
+          head_msg="$(git log -1 --pretty=format:'%B')"
+          if printf '%s' "$head_msg" | grep -qiF '[skip release]'; then
+            echo "Latest commit requests [skip release]; skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Most recent semver tag reachable from HEAD (empty on first release).
+          last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+          if [ -z "$last_tag" ]; then
+            echo "No previous v* tag found; starting from v0.0.0."
+            base="v0.0.0"
+            range="HEAD"
+          else
+            echo "Last tag: $last_tag"
+            base="$last_tag"
+            range="${last_tag}..HEAD"
+          fi
+
+          # Commit hashes in the range, one per line. We inspect each commit's
+          # subject and body individually via `git log -1` (rather than a single
+          # blob) because bash command substitution strips NUL bytes, which would
+          # otherwise collapse a multi-commit log into one record.
+          mapfile -t shas < <(git log "$range" --pretty=format:'%H')
+          if [ "${#shas[@]}" -eq 0 ]; then
+            echo "No commits since $base; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Found ${#shas[@]} commit(s) since $base."
+
+          bump="patch"   # default: every merge is releasable
+          for sha in "${shas[@]}"; do
+            subject="$(git log -1 "$sha" --pretty=format:'%s')"
+            body="$(git log -1 "$sha" --pretty=format:'%b')"
+            # MAJOR: `type!:` / `type(scope)!:` subject, or BREAKING CHANGE in body.
+            if printf '%s' "$subject" | grep -Eq '^[a-zA-Z]+(\([^)]*\))?!:' \
+               || printf '%s' "$body" | grep -Eq 'BREAKING[ -]CHANGE'; then
+              echo "  $subject  => MAJOR"
+              bump="major"
+              break
+            fi
+            # MINOR: a feat: commit (only upgrade if not already major).
+            if [ "$bump" != "major" ] \
+               && printf '%s' "$subject" | grep -Eq '^feat(\([^)]*\))?:'; then
+              echo "  $subject  => minor"
+              bump="minor"
+            fi
+          done
+
+          ver="${base#v}"
+          major="${ver%%.*}"
+          rest="${ver#*.}"
+          minor="${rest%%.*}"
+          patch="${rest#*.}"
+          # Guard against non-numeric components.
+          major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          new_tag="v${major}.${minor}.${patch}"
+          echo "Bump: $bump  ->  $new_tag (from $base)"
+
+          if git rev-parse "$new_tag" >/dev/null 2>&1; then
+            echo "Tag $new_tag already exists; skipping to avoid a duplicate release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: steps.bump.outputs.release == 'true'
+        env:
+          NEW_TAG: ${{ steps.bump.outputs.new_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "$NEW_TAG"
+          git push origin "refs/tags/$NEW_TAG"
+          echo "Pushed $NEW_TAG"
+
+  # Runs GoReleaser against the freshly pushed tag. Skipped on a no-op.
+  release:
+    needs: compute-tag
+    if: needs.compute-tag.outputs.release == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.compute-tag.outputs.new_tag }}
+    # Pass GPG_PRIVATE_KEY / PASSPHRASE (and GITHUB_TOKEN) through to the
+    # reusable Release workflow.
+    secrets: inherit

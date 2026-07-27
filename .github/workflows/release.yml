@@ -1,8 +1,15 @@
 # Terraform Provider release workflow.
 #
-# Creates a signed GitHub Release when a semver tag ("v*", e.g. v0.1.0) is
-# pushed. GoReleaser builds the multi-platform archives, SHA256SUMS, and GPG
+# Creates a signed GitHub Release for a semver tag ("v*", e.g. v0.1.0).
+# GoReleaser builds the multi-platform archives, SHA256SUMS, and GPG
 # signature; the Terraform Registry ingests them via the release webhook.
+#
+# Two ways to invoke it:
+#   1. push: tags  - a maintainer pushes a "v*" tag manually (unchanged behavior).
+#   2. workflow_call - the Auto Release workflow (auto-release.yml) computes the
+#      next version, creates+pushes the tag, then calls this workflow directly
+#      with `ref` set to that tag. This avoids the GITHUB_TOKEN "a tag pushed by
+#      a workflow won't trigger another workflow" limitation without a PAT.
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   GPG_PRIVATE_KEY  ASCII-armored private key (gpg --armor --export-secret-keys <id>)
@@ -13,6 +20,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref (tag) to build and release. Defaults to the triggering ref."
+        required: false
+        type: string
 
 # Releases need write access to create the release and upload assets.
 permissions:
@@ -25,6 +38,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # For workflow_call, build the exact tag the caller created. For a
+          # direct tag push, inputs.ref is empty and this falls back to the
+          # pushed tag (github.ref) - i.e. the original behavior.
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Set up Go
