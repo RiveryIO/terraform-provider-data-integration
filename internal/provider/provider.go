@@ -145,6 +145,8 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 		NewVariableResource,
 		NewDataFlowVariablesResource,
 		NewCDCConfigResource,
+		NewBlueprintFileResource,
+		NewBlueprintResource,
 	}
 }
 

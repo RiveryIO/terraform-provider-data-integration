@@ -42,17 +42,19 @@ type connectionResource struct {
 }
 
 type connectionModel struct {
-	ID              types.String         `tfsdk:"id"`
-	EnvironmentID   types.String         `tfsdk:"environment_id"`
-	Name            types.String         `tfsdk:"name"`
-	Type            types.String         `tfsdk:"type"`
-	ParametersJSON  jsontypes.Normalized `tfsdk:"parameters_json"`
-	FzConnectionID  types.String         `tfsdk:"fz_connection_id"`
-	ConnectionInfo  jsontypes.Normalized `tfsdk:"connection_info"`
-	FileParams      types.Map            `tfsdk:"file_params"`
-	FileParamPaths  types.Map            `tfsdk:"file_param_paths"`
-	SshPkeyFile     types.String         `tfsdk:"ssh_pkey_file"`
-	SshPkeyFilePath types.String         `tfsdk:"ssh_pkey_file_path"`
+	ID                         types.String         `tfsdk:"id"`
+	EnvironmentID              types.String         `tfsdk:"environment_id"`
+	Name                       types.String         `tfsdk:"name"`
+	Type                       types.String         `tfsdk:"type"`
+	ParametersJSON             jsontypes.Normalized `tfsdk:"parameters_json"`
+	FzConnectionID             types.String         `tfsdk:"fz_connection_id"`
+	ConnectionInfo             jsontypes.Normalized `tfsdk:"connection_info"`
+	FileParams                 types.Map            `tfsdk:"file_params"`
+	FileParamsContent          types.Map            `tfsdk:"file_params_content"`
+	FileParamsContentFilenames types.Map            `tfsdk:"file_params_content_filenames"`
+	FileParamPaths             types.Map            `tfsdk:"file_param_paths"`
+	SshPkeyFile                types.String         `tfsdk:"ssh_pkey_file"`
+	SshPkeyFilePath            types.String         `tfsdk:"ssh_pkey_file_path"`
 }
 
 func (r *connectionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -120,6 +122,29 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"SSH keys, etc. The uploaded paths are stored in file_param_paths. " +
 					"Write-only: local paths are never stored in state.",
 			},
+			"file_params_content": schema.MapAttribute{
+				Optional:    true,
+				WriteOnly:   true,
+				Sensitive:   true,
+				ElementType: types.StringType,
+				Description: "Map of connection-body field name → raw file content, uploaded via the " +
+					"connection-files API the same way as file_params, but the content is never written " +
+					"to local disk. Write-only, so — unlike file_params, which takes a local path and is " +
+					"only Sensitive — this accepts values derived from an ephemeral resource directly " +
+					"(e.g. an `ephemeral \"aws_secretsmanager_secret_version\"` private key), keeping the " +
+					"secret out of both local disk and Terraform state. Use this instead of file_params " +
+					"whenever the credential file's content comes from an ephemeral source.",
+			},
+			"file_params_content_filenames": schema.MapAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "Map of connection-body field name → upload filename, for entries in " +
+					"file_params_content whose target API validates the file by extension (e.g. Snowflake's " +
+					"key_file_path requires a \".p8\" filename — check GET /v1/connections_types/{type} for " +
+					"the expected extension). Not sensitive: only a filename, never file content. Defaults " +
+					"to the field name itself (no extension) when omitted, which is fine for extension-" +
+					"insensitive fields.",
+			},
 			"file_param_paths": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
@@ -171,6 +196,9 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	if plan.FileParams.IsNull() || plan.FileParams.IsUnknown() {
 		plan.FileParams = cfg.FileParams
 	}
+	if plan.FileParamsContent.IsNull() || plan.FileParamsContent.IsUnknown() {
+		plan.FileParamsContent = cfg.FileParamsContent
+	}
 
 	envID := resolveEnvironmentID(plan.EnvironmentID.ValueString(), r.data)
 	if envID == "" {
@@ -184,6 +212,18 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	filePaths := uploadFileParams(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParams, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	contentPaths := uploadFileParamsContent(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParamsContent, plan.FileParamsContentFilenames, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(contentPaths) > 0 {
+		if filePaths == nil {
+			filePaths = make(map[string]string, len(contentPaths))
+		}
+		for field, serverPath := range contentPaths {
+			filePaths[field] = serverPath
+		}
 	}
 
 	// Legacy ssh_pkey_file support (deprecated — prefer file_params).
@@ -267,6 +307,9 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	if plan.FileParams.IsNull() || plan.FileParams.IsUnknown() {
 		plan.FileParams = cfg.FileParams
 	}
+	if plan.FileParamsContent.IsNull() || plan.FileParamsContent.IsUnknown() {
+		plan.FileParamsContent = cfg.FileParamsContent
+	}
 
 	envID := plan.EnvironmentID.ValueString()
 
@@ -304,6 +347,18 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	filePaths := uploadFileParams(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParams, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	contentPaths := uploadFileParamsContent(ctx, r.data.client, envID, plan.Type.ValueString(), plan.FileParamsContent, plan.FileParamsContentFilenames, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(contentPaths) > 0 {
+		if filePaths == nil {
+			filePaths = make(map[string]string, len(contentPaths))
+		}
+		for field, serverPath := range contentPaths {
+			filePaths[field] = serverPath
+		}
 	}
 
 	// Legacy ssh_pkey_file support (deprecated — prefer file_params).
@@ -509,6 +564,54 @@ func uploadFileParams(
 			diags.AddAttributeError(
 				path.Root("file_params"),
 				"Error uploading file for "+field,
+				err.Error(),
+			)
+			return nil
+		}
+		paths[field] = serverPath
+	}
+	return paths
+}
+
+// uploadFileParamsContent uploads each raw content value in the file_params_content
+// map directly (no local disk involved) and returns a map of field_name → server_side_path
+// to be merged into the connection body, same shape as uploadFileParams' return value.
+func uploadFileParamsContent(
+	ctx context.Context,
+	client interface {
+		UploadConnectionFileContent(context.Context, string, string, string, string) (string, error)
+	},
+	envID, connType string,
+	fileParamsContent, filenames types.Map,
+	diags *diag.Diagnostics,
+) map[string]string {
+	if fileParamsContent.IsNull() || fileParamsContent.IsUnknown() {
+		return nil
+	}
+	var filenameOverrides map[string]string
+	if !filenames.IsNull() && !filenames.IsUnknown() {
+		filenameOverrides = make(map[string]string, len(filenames.Elements()))
+		for field, val := range filenames.Elements() {
+			if s, ok := val.(types.String); ok && !s.IsNull() && !s.IsUnknown() {
+				filenameOverrides[field] = s.ValueString()
+			}
+		}
+	}
+	paths := make(map[string]string, len(fileParamsContent.Elements()))
+	for field, val := range fileParamsContent.Elements() {
+		content, ok := val.(types.String)
+		if !ok || content.IsNull() || content.IsUnknown() {
+			continue
+		}
+		filename := field
+		if fn, ok := filenameOverrides[field]; ok && fn != "" {
+			filename = fn
+		}
+		serverPath, err := client.UploadConnectionFileContent(ctx, envID, connType, filename, content.ValueString())
+		if err != nil {
+			diags.AddAttributeError(
+				path.Root("file_params_content"),
+				"Error uploading content for "+field,
 				err.Error(),
 			)
 			return nil

@@ -264,3 +264,59 @@ resource "boomi_data_integration_dataframe" "test" {
 }
 `, name, connID, bucket)
 }
+
+// TestAccBlueprintResource exercises create → import → update for a blueprint
+// (recipe) and its backing blueprint_file, asserting idempotency at each step.
+// Unlike logicode_file, both APIs support PUT, so file content and the
+// blueprint's description can both be updated in place without forcing a new
+// resource.
+func TestAccBlueprintResource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccBlueprintConfig("tf-acc-blueprint", "first"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("boomi_data_integration_blueprint_file.test", "id"),
+					resource.TestCheckResourceAttrSet("boomi_data_integration_blueprint.test", "id"),
+					resource.TestCheckResourceAttr("boomi_data_integration_blueprint.test", "name", "tf-acc-blueprint"),
+					resource.TestCheckResourceAttr("boomi_data_integration_blueprint.test", "description", "first"),
+					resource.TestCheckResourceAttrPair(
+						"boomi_data_integration_blueprint.test", "file_cross_id",
+						"boomi_data_integration_blueprint_file.test", "id"),
+				),
+			},
+			{
+				ResourceName:      "boomi_data_integration_blueprint.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccBlueprintConfig("tf-acc-blueprint", "second"),
+				Check: resource.TestCheckResourceAttr(
+					"boomi_data_integration_blueprint.test", "description", "second"),
+			},
+		},
+	})
+}
+
+func testAccBlueprintConfig(name, desc string) string {
+	return fmt.Sprintf(`
+provider "boomi" {}
+
+resource "boomi_data_integration_blueprint_file" "test" {
+  filename = "tf-acc-blueprint.yaml"
+  content  = <<-YAML
+    name: tf-acc-blueprint
+    steps: []
+  YAML
+}
+
+resource "boomi_data_integration_blueprint" "test" {
+  name          = %q
+  description   = %q
+  file_cross_id = boomi_data_integration_blueprint_file.test.id
+}
+`, name, desc)
+}

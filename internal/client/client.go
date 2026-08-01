@@ -524,6 +524,53 @@ func (c *Client) UploadConnectionFile(ctx context.Context, environmentID, connTy
 	return out.FilePath, nil
 }
 
+// UploadConnectionFileContent uploads raw in-memory content (e.g. a value derived
+// from an ephemeral resource, which is never written to local disk) to the same
+// connection-file endpoint as UploadConnectionFile, and returns the server-side
+// file_path. Field name defaults to "file" plus a synthetic name since the API
+// only needs bytes, not a real filename.
+func (c *Client) UploadConnectionFileContent(ctx context.Context, environmentID, connType, filename, content string) (string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		return "", fmt.Errorf("creating multipart field: %w", err)
+	}
+	if _, err = fw.Write([]byte(content)); err != nil {
+		return "", fmt.Errorf("writing file content: %w", err)
+	}
+	if err = mw.Close(); err != nil {
+		return "", fmt.Errorf("finalizing multipart body: %w", err)
+	}
+
+	uploadURL := c.envPath(environmentID, fmt.Sprintf("/connections/%s/files", connType))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &buf)
+	if err != nil {
+		return "", fmt.Errorf("building upload request: %w", err)
+	}
+	req.Header = c.headers()
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("uploading file content: %w", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: "POST " + uploadURL, Details: truncate(respBody)}
+	}
+
+	var out struct {
+		FilePath string `json:"file_path"`
+	}
+	if err = json.Unmarshal(respBody, &out); err != nil {
+		return "", fmt.Errorf("decoding upload response: %w", err)
+	}
+	return out.FilePath, nil
+}
+
 // ---- Environments (account-scoped) -----------------------------------------
 
 // GetEnvironment fetches an environment by id.
@@ -1185,4 +1232,138 @@ func (c *Client) GetConnectionType(ctx context.Context, connectionType string) (
 		return nil, err
 	}
 	return out, nil
+}
+
+// ---- Blueprints (environment-scoped) ---------------------------------------
+//
+// Customer-facing term is "blueprint"; the API/code term is "recipe" — same
+// river/data_flow-style split documented at the top of this file. A blueprint
+// is two API entities: the recipe_file (the uploaded YAML content, keyed by
+// cross_id) and the recipe (the named entity referencing a recipe_file's
+// cross_id). Both support full CRUD, unlike the create+read-only logicode
+// file API.
+//
+// recipe_files flow: POST/PUT multipart {file} → {cross_id, filename, ...}
+//                     GET/{cross_id} → same shape (content itself is never
+//                     read back — the API returns a short-lived presigned S3
+//                     URL, not the YAML text, so content is config-authoritative
+//                     like logicode).
+// recipe flow:        POST/PUT JSON {name, file_cross_id, description} →
+//                     {cross_id, name, file_cross_id, description, ...}
+
+// BlueprintFileResponse is the shape returned by recipe_files create/update/get.
+type BlueprintFileResponse struct {
+	CrossID  string `json:"cross_id"`
+	Filename string `json:"filename"`
+}
+
+// blueprintFileMultipart builds and sends the multipart request shared by
+// CreateBlueprintFile and UpdateBlueprintFile — both POST/PUT a single "file"
+// form field and decode the same response shape.
+func (c *Client) blueprintFileMultipart(
+	ctx context.Context, method, url, filename, content string,
+) (BlueprintFileResponse, error) {
+	var out BlueprintFileResponse
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		return out, fmt.Errorf("creating multipart field: %w", err)
+	}
+	if _, err = fw.Write([]byte(content)); err != nil {
+		return out, fmt.Errorf("writing blueprint content: %w", err)
+	}
+	if err = mw.Close(); err != nil {
+		return out, fmt.Errorf("finalizing multipart body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, &buf)
+	if err != nil {
+		return out, fmt.Errorf("building request: %w", err)
+	}
+	req.Header = c.headers()
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return out, fmt.Errorf("uploading blueprint content: %w", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, &APIError{StatusCode: resp.StatusCode, Message: method + " " + url, Details: truncate(respBody)}
+	}
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &out); err != nil {
+			return out, fmt.Errorf("decoding response: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// CreateBlueprintFile uploads new blueprint YAML content and returns the
+// assigned file cross_id.
+func (c *Client) CreateBlueprintFile(ctx context.Context, environmentID, filename, content string) (BlueprintFileResponse, error) {
+	url := c.envPath(environmentID, "/recipes/files")
+	return c.blueprintFileMultipart(ctx, http.MethodPost, url, filename, content)
+}
+
+// UpdateBlueprintFile replaces the content of an existing blueprint file
+// in-place, keeping its cross_id stable.
+func (c *Client) UpdateBlueprintFile(ctx context.Context, environmentID, crossID, filename, content string) (BlueprintFileResponse, error) {
+	url := c.envPath(environmentID, "/recipes/files/"+crossID)
+	return c.blueprintFileMultipart(ctx, http.MethodPut, url, filename, content)
+}
+
+// GetBlueprintFile fetches a blueprint file's metadata by cross_id. Content
+// is never returned (only a short-lived presigned URL the API doesn't expose
+// here), so this is used purely for drift (existence) detection.
+func (c *Client) GetBlueprintFile(ctx context.Context, environmentID, crossID string) (BlueprintFileResponse, error) {
+	var out BlueprintFileResponse
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/recipes/files/"+crossID), nil, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// DeleteBlueprintFile deletes a blueprint file by cross_id.
+func (c *Client) DeleteBlueprintFile(ctx context.Context, environmentID, crossID string) error {
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/recipes/files/"+crossID), nil, nil)
+}
+
+// GetBlueprint fetches a blueprint (recipe) by cross_id.
+func (c *Client) GetBlueprint(ctx context.Context, environmentID, crossID string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/recipes/"+crossID), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateBlueprint creates a blueprint (recipe) referencing an already-uploaded
+// blueprint file's cross_id. body: {name, file_cross_id, description?}.
+func (c *Client) CreateBlueprint(ctx context.Context, environmentID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/recipes"), body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateBlueprint updates a blueprint's name, file_cross_id, and/or description.
+func (c *Client) UpdateBlueprint(ctx context.Context, environmentID, crossID string, patch map[string]any) (map[string]any, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/recipes/"+crossID), patch, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteBlueprint deletes a blueprint (recipe) by cross_id. Does not delete
+// the underlying blueprint file — that is a separate resource with its own
+// lifecycle.
+func (c *Client) DeleteBlueprint(ctx context.Context, environmentID, crossID string) error {
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/recipes/"+crossID), nil, nil)
 }
