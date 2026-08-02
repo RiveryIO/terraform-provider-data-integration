@@ -10,16 +10,16 @@ import (
 )
 
 var (
-	_ datasource.DataSource              = (*riverGroupDataSource)(nil)
-	_ datasource.DataSourceWithConfigure = (*riverGroupDataSource)(nil)
+	_ datasource.DataSource              = (*dataFlowGroupDataSource)(nil)
+	_ datasource.DataSourceWithConfigure = (*dataFlowGroupDataSource)(nil)
 )
 
-// NewRiverGroupDataSource is the factory registered with the provider.
-func NewRiverGroupDataSource() datasource.DataSource { return &riverGroupDataSource{} }
+// NewDataFlowGroupDataSource is the factory registered with the provider.
+func NewDataFlowGroupDataSource() datasource.DataSource { return &dataFlowGroupDataSource{} }
 
-type riverGroupDataSource struct{ data *providerData }
+type dataFlowGroupDataSource struct{ data *providerData }
 
-type riverGroupDataModel struct {
+type dataFlowGroupDataModel struct {
 	ID            types.String `tfsdk:"id"`
 	EnvironmentID types.String `tfsdk:"environment_id"`
 	Name          types.String `tfsdk:"name"`
@@ -28,13 +28,13 @@ type riverGroupDataModel struct {
 	IsDefault     types.Bool   `tfsdk:"is_default"`
 }
 
-func (d *riverGroupDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_river_group"
+func (d *dataFlowGroupDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_data_flow_group"
 }
 
-func (d *riverGroupDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *dataFlowGroupDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Looks up an existing river group (folder) by name. " +
+		Description: "Looks up an existing data flow group (folder) by name. " +
 			"Groups must be created in the Data Integration UI — the v1 API exposes read-only access. " +
 			"Use this data source to obtain a group's cross_id and pass it as group_id to data flow resources.",
 		Attributes: map[string]schema.Attribute{
@@ -67,7 +67,7 @@ func (d *riverGroupDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 	}
 }
 
-func (d *riverGroupDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *dataFlowGroupDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -80,8 +80,8 @@ func (d *riverGroupDataSource) Configure(_ context.Context, req datasource.Confi
 	d.data = pd
 }
 
-func (d *riverGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var config riverGroupDataModel
+func (d *dataFlowGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config dataFlowGroupDataModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -97,16 +97,16 @@ func (d *riverGroupDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
-	groups, err := d.data.client.ListRiverGroups(ctx, envID)
+	groups, err := d.data.client.ListDataFlowGroups(ctx, envID)
 	if err != nil {
-		addAPIError(&resp.Diagnostics, "Error listing river groups", err)
+		addAPIError(&resp.Diagnostics, "Error listing data flow groups", err)
 		return
 	}
 
 	want := config.Name.ValueString()
 	for _, g := range groups {
 		if g.Name == want {
-			resp.Diagnostics.Append(resp.State.Set(ctx, &riverGroupDataModel{
+			resp.Diagnostics.Append(resp.State.Set(ctx, &dataFlowGroupDataModel{
 				ID:            types.StringValue(g.ID),
 				EnvironmentID: types.StringValue(envID),
 				Name:          types.StringValue(g.Name),
@@ -119,7 +119,7 @@ func (d *riverGroupDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 
 	resp.Diagnostics.AddError(
-		"River group not found",
+		"Data flow group not found",
 		fmt.Sprintf("No group named %q exists in environment %s. Create it in the Data Integration UI first.", want, envID),
 	)
 }

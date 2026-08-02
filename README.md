@@ -95,7 +95,7 @@ credentials:
 
 ```bash
 export DATA_INTEGRATION_API_TOKEN=... DATA_INTEGRATION_ACCOUNT_ID=... \
-       DATA_INTEGRATION_ENVIRONMENT_ID=... RIVERY_ACC_SUBRIVER_ID=<a real river cross_id>
+       DATA_INTEGRATION_ENVIRONMENT_ID=... RIVERY_ACC_SUB_FLOW_ID=<a real data flow cross_id>
 make testacc
 ```
 
@@ -134,11 +134,11 @@ make testacc
   keys untouched). Requires a token with explicit `variables:list`/`variables:edit`
   scopes — a `role:admin`-only env grant returns `403`.
 
-- **`boomi_data_integration_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC river.**
-  Manages a CDC river's source offset (mysql binlog / pg+mssql lsn / mongo resume
+- **`boomi_data_integration_data_flow_cdc_config` — CRUD verified; not exercised on a true CDC data flow.**
+  Manages a CDC data flow's source offset (mysql binlog / pg+mssql lsn / mongo resume
   token / oracle scn) via `config_json`. Create/update (single `POST`) and delete
-  (`DELETE`) verified live against a real river; the offset GET validates CDC-only,
-  so a genuinely CDC-enabled river is needed to exercise reads. Config-authoritative
+  (`DELETE`) verified live against a real data flow; the offset GET validates CDC-only,
+  so a genuinely CDC-enabled data flow is needed to exercise reads. Config-authoritative
   (the offset advances at runtime; not drift-reconciled) — intended to seed/reset.
 
 ### Auth error reporting

@@ -1,7 +1,7 @@
 # source_to_target → BigQuery example
 
-Authors a `source_to_target` river targeting **BigQuery** with the
-`riveryio/data-integration` provider. Modeled on a real integration river (ECB
+Authors a `source_to_target` data flow targeting **BigQuery** with the
+`riveryio/data-integration` provider. Modeled on a real integration data flow (ECB
 exchange rates → BigQuery): `properties.json` is the exact `source_to_target`
 body the API accepts (source + 10-column mapping + `loading_method=overwrite`);
 `main.tf` creates a fresh `gcloud` connection and wires its id + the target
@@ -11,9 +11,9 @@ body the API accepts (source + 10-column mapping + `loading_method=overwrite`);
 
 A functional BigQuery `gcloud` connection needs an **uploaded service-account key
 file**. The provider creates connections from JSON only and **cannot upload a key
-file**, so a river using a provider-created BigQuery connection:
+file**, so a data flow using a provider-created BigQuery connection:
 
-- **creates** fine (river + connection resources apply cleanly), but
+- **creates** fine (data flow + connection resources apply cleanly), but
 - **fails activation** with `Dataset <name> was not found in BigQuery`
   (`[RVR-ACTIVATE-500]`) — the keyless connection can't authenticate to the GCP
   project, so the platform's dataset validation fails — and therefore
@@ -29,7 +29,7 @@ tracked under CORE-2346.
 
 No credentials are committed. Provider auth comes from the
 `DATA_INTEGRATION_API_TOKEN` env var; GCP identifiers come from
-`terraform.tfvars` (git-ignored). `properties.json` is river structure only — no
+`terraform.tfvars` (git-ignored). `properties.json` is data flow structure only — no
 secrets. Never commit `terraform.tfvars` or `*.tfstate`.
 
 ## Run it
@@ -41,6 +41,6 @@ export DATA_INTEGRATION_ENVIRONMENT_ID=<existing_env_id>
 export DATA_INTEGRATION_API_TOKEN=<token>
 
 cp terraform.tfvars.example terraform.tfvars   # then edit
-terraform apply   # creates the connection + river (river starts disabled)
+terraform apply   # creates the connection + data flow (data flow starts disabled)
 # Upload the SA key on the connection in the console, then activate + run.
 ```

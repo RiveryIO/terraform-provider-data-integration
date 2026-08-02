@@ -55,16 +55,16 @@ func TestAccEnvironmentResource(t *testing.T) {
 // flow, the resource where read shape ≠ write shape — the import-verify step is
 // the load-bearing check that normalization keeps plans clean.
 func TestAccDataFlowResource(t *testing.T) {
-	subRiverID := os.Getenv("RIVERY_ACC_SUBRIVER_ID")
-	if subRiverID == "" {
-		t.Skip("RIVERY_ACC_SUBRIVER_ID not set — a real river_id is required for a logic leaf step")
+	subFlowID := os.Getenv("RIVERY_ACC_SUB_FLOW_ID")
+	if subFlowID == "" {
+		t.Skip("RIVERY_ACC_SUB_FLOW_ID not set — a real river_id is required for a logic leaf step")
 	}
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataFlowConfig("tf-acc-flow", "first", subRiverID),
+				Config: testAccDataFlowConfig("tf-acc-flow", "first", subFlowID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("boomi_data_integration_data_flow.test", "id"),
 					resource.TestCheckResourceAttr("boomi_data_integration_data_flow.test", "name", "tf-acc-flow"),
@@ -85,7 +85,7 @@ func TestAccDataFlowResource(t *testing.T) {
 				},
 			},
 			{
-				Config: testAccDataFlowConfig("tf-acc-flow", "second", subRiverID),
+				Config: testAccDataFlowConfig("tf-acc-flow", "second", subFlowID),
 				Check: resource.TestCheckResourceAttr(
 					"boomi_data_integration_data_flow.test", "description", "second"),
 			},
@@ -174,34 +174,35 @@ resource "boomi_data_integration_variable" "test" {
 }
 
 // TestAccCDCConfigResource exercises create → update → destroy of a CDC offset.
-// Requires a real CDC river id in DATA_INTEGRATION_ACC_CDC_RIVER_ID; skipped
-// otherwise (the set path works on any river, but a meaningful test wants a CDC
-// river). config_json is config-authoritative, so there is no import-verify step.
+// Requires a real CDC data flow id in DATA_INTEGRATION_ACC_CDC_DATA_FLOW_ID;
+// skipped otherwise (the set path works on any data flow, but a meaningful test
+// wants a CDC data flow). config_json is config-authoritative, so there is no
+// import-verify step.
 func TestAccCDCConfigResource(t *testing.T) {
-	riverID := os.Getenv("DATA_INTEGRATION_ACC_CDC_RIVER_ID")
-	if riverID == "" {
-		t.Skip("DATA_INTEGRATION_ACC_CDC_RIVER_ID not set — a CDC river id is required")
+	dataFlowID := os.Getenv("DATA_INTEGRATION_ACC_CDC_DATA_FLOW_ID")
+	if dataFlowID == "" {
+		t.Skip("DATA_INTEGRATION_ACC_CDC_DATA_FLOW_ID not set — a CDC data flow id is required")
 	}
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCDCConfigConfig(riverID, "515820321"),
+				Config: testAccCDCConfigConfig(dataFlowID, "515820321"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "id", riverID),
-					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "data_flow_id", riverID),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "id", dataFlowID),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_cdc_config.test", "data_flow_id", dataFlowID),
 				),
 			},
 			{
-				Config: testAccCDCConfigConfig(riverID, "515820999"),
+				Config: testAccCDCConfigConfig(dataFlowID, "515820999"),
 				Check:  resource.TestCheckResourceAttrSet("boomi_data_integration_data_flow_cdc_config.test", "config_json"),
 			},
 		},
 	})
 }
 
-func testAccCDCConfigConfig(riverID, pos string) string {
+func testAccCDCConfigConfig(dataFlowID, pos string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
@@ -213,7 +214,7 @@ resource "boomi_data_integration_data_flow_cdc_config" "test" {
     binlog_position = %q
   })
 }
-`, riverID, pos)
+`, dataFlowID, pos)
 }
 
 func testAccEnvironmentConfig(name, desc string) string {
@@ -227,7 +228,7 @@ resource "boomi_data_integration_environment" "test" {
 `, name, desc)
 }
 
-func testAccDataFlowConfig(name, desc, subRiverID string) string {
+func testAccDataFlowConfig(name, desc, subFlowID string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
 
@@ -245,7 +246,7 @@ resource "boomi_data_integration_data_flow" "test" {
     }]
   })
 }
-`, name, desc, subRiverID)
+`, name, desc, subFlowID)
 }
 
 func testAccDataFrameConfig(name, connID, bucket string) string {

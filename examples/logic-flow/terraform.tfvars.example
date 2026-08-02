@@ -7,8 +7,8 @@ environment_id = "<existing_environment_id>"
 group_id       = "<env_group_cross_id>" # required for the Snowflake step to route
 # api_token    = "<token>"              # better: export DATA_INTEGRATION_API_TOKEN
 
-river_name   = "TF_logic_multistep"
-sub_river_id = "<cross_id of an existing river to run as step 1>"
+data_flow_name   = "TF_logic_multistep"
+sub_data_flow_id = "<cross_id of an existing data flow to run as step 1>"
 
 # Python (logicode) step — OPTIONAL. Leave python_file_id empty to omit it; the
 # API cannot upload code via Terraform, so this must reference an existing file.

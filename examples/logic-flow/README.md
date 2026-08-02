@@ -1,16 +1,16 @@
-# Logic river example (multi-step)
+# Logic data flow example (multi-step)
 
-Creates a **logic river** (`type = logic` data flow) with the
-`riveryio/data-integration` provider. A logic river runs an ordered pipeline of
+Creates a **logic data flow** (`type = logic` data flow) with the
+`riveryio/data-integration` provider. A logic data flow runs an ordered pipeline of
 steps; this example builds a `run_once` container with three step types:
 
-1. **`river`** — run an existing river (e.g. the one from
+1. **`river`** — run an existing data flow (e.g. the one from
    [`../source-to-target`](../source-to-target)) via its `cross_id`.
 2. **`logicode` (Python)** — run a Python step *(optional — see the file_id note)*.
 3. **`snowflake_sql_query`** — a SQL / DB transformation writing its `SELECT`
    result to a warehouse table.
 
-The provider models the river body as opaque JSON (`properties_json`), so the
+The provider models the data flow body as opaque JSON (`properties_json`), so the
 config emits the exact step shapes the API accepts:
 
 ```json
@@ -31,8 +31,8 @@ config emits the exact step shapes the API accepts:
 
 - **Python step needs an uploaded `file_id`.** The API cannot create code via
   Terraform. Leave `python_file_id = ""` (default) to omit the Python step; set
-  it to a real `file_id` (from the UI code editor or another river) to include it.
-- **Snowflake step needs `group_id`.** A logic river that uses a shared warehouse
+  it to a real `file_id` (from the UI code editor or another data flow) to include it.
+- **Snowflake step needs `group_id`.** A logic data flow that uses a shared warehouse
   connection must set `group_id` to the environment's group cross_id, or the
   connection fails to route at run time with a misleading 404. This example sets
   it via `var.group_id` on the `boomi_data_integration_data_flow` resource.
@@ -50,13 +50,13 @@ terraform apply \
   -var "account_id=$DATA_INTEGRATION_ACCOUNT_ID" \
   -var "environment_id=$DATA_INTEGRATION_ENVIRONMENT_ID" \
   -var "group_id=<env_group_cross_id>" \
-  -var "sub_river_id=<cross_id of a river to orchestrate>" \
+  -var "sub_data_flow_id=<cross_id of a data flow to orchestrate>" \
   -var "sf_account_name=<snowflake_account>" \
   -var "sf_username=<user>" -var "sf_password=<pass>" \
   -var "sf_target_database=<db>"
   # add -var "python_file_id=<file_id>" to include the Python step
 ```
 
-Terraform creates the river **disabled**; activate + run it through the API
+Terraform creates the data flow **disabled**; activate + run it through the API
 (`activate_river` + `run`) or the console. The number of pipeline steps is in the
 `step_count` output (2 without a Python step, 3 with).

@@ -129,8 +129,8 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"carry over paths from an imported connection without re-uploading.",
 			},
 			"ssh_pkey_file": schema.StringAttribute{
-				Optional:   true,
-				Sensitive:  true,
+				Optional:           true,
+				Sensitive:          true,
 				DeprecationMessage: "Use file_params = { ssh_pkey_file_path = \"<local path>\" } instead.",
 				Description: "Deprecated: use file_params. Local path to a PEM private-key file for " +
 					"SSH tunnel authentication. Uploads via the connection-files API and stores the " +
@@ -198,7 +198,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	// The connections API speaks connection_name / connection_type (not the
-	// generic name/type used by rivers and environments).
+	// generic name/type used by data flows and environments).
 	body := map[string]any{"connection_name": plan.Name.ValueString(), "connection_type": plan.Type.ValueString()}
 	if !plan.FzConnectionID.IsNull() && plan.FzConnectionID.ValueString() != "" {
 		body["fz_connection_id"] = plan.FzConnectionID.ValueString()

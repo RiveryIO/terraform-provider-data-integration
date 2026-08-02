@@ -27,8 +27,8 @@ variable "group_id" {
   default     = null
 }
 
-# ── River ───────────────────────────────────────────────────────────────────
-variable "river_name" {
+# ── Data flow ─────────────────────────────────────────────────────────────────
+variable "data_flow_name" {
   type    = string
   default = "TF_s2t_bigquery"
 }

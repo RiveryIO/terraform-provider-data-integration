@@ -1,12 +1,12 @@
-# source_to_target river → BigQuery, authored with the riveryio/data-integration
-# provider. Modeled on a real integration river (ECB rates → BigQuery). The river
-# body is opaque JSON (properties.json) mirroring the exact source_to_target
-# structure the API accepts; only the target connection_id + dataset are wired
-# from resources/vars.
+# source_to_target data flow → BigQuery, authored with the riveryio/data-integration
+# provider. Modeled on a real integration data flow (ECB rates → BigQuery). The
+# data flow body is opaque JSON (properties.json) mirroring the exact
+# source_to_target structure the API accepts; only the target connection_id +
+# dataset are wired from resources/vars.
 #
 # ⚠️ KNOWN LIMITATION (provider gap): a working BigQuery target needs a `gcloud`
 # connection with an uploaded service-account KEY FILE. The provider's JSON-only
-# connection create cannot upload a key file, so a river using this connection
+# connection create cannot upload a key file, so a data flow using this connection
 # AUTHORS fine but FAILS activation with "Dataset <name> was not found in
 # BigQuery" until the connection's key is supplied out-of-band (e.g. the console).
 # See README.md.
@@ -54,7 +54,7 @@ locals {
 
 resource "boomi_data_integration_data_flow" "s2t" {
   environment_id = var.environment_id
-  name           = var.river_name
+  name           = var.data_flow_name
   type           = "source_to_target"
   kind           = "main_river"
 
@@ -65,7 +65,7 @@ resource "boomi_data_integration_data_flow" "s2t" {
   group_id = var.group_id
 }
 
-output "river_id" {
+output "data_flow_id" {
   value = boomi_data_integration_data_flow.s2t.id
 }
 

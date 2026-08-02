@@ -3,12 +3,12 @@
 page_title: "boomi_data_integration_data_flow Resource - boomi"
 subcategory: ""
 description: |-
-  A Data Integration data flow (the API calls this a "river"). The flow definition is supplied as JSON via properties_json; this keeps the resource forward-compatible with the full river schema without re-modelling every field.
+  A Data Integration data flow (the API calls this a "river"). The flow definition is supplied as JSON via properties_json; this keeps the resource forward-compatible with the full data flow schema without re-modelling every field.
 ---
 
 # boomi_data_integration_data_flow (Resource)
 
-A Data Integration data flow (the API calls this a "river"). The flow definition is supplied as JSON via properties_json; this keeps the resource forward-compatible with the full river schema without re-modelling every field.
+A Data Integration data flow (the API calls this a "river"). The flow definition is supplied as JSON via properties_json; this keeps the resource forward-compatible with the full data flow schema without re-modelling every field.
 
 
 
@@ -18,20 +18,20 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 ### Required
 
 - `name` (String) Data flow name.
-- `properties_json` (String) The river properties object as JSON — must include a properties_type discriminator and (for logic flows) a non-empty logic_steps array. This value is config-authoritative: the API enriches it on write (logic_steps gain step_id/is_enabled/…), so the provider keeps your configured value and does not refresh it from the API. Drift inside this blob is therefore not detected. NATIVE CONNECTORS (run_type="multi_tables", is_native — e.g. github): their required Source Settings live under source.additional_settings.interface_parameters.source[] and are NOT validated by this provider. Discover the mandatory ones with GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry in cross_reports_predefined[] with "required": true must be supplied (e.g. github requires organization AND repositories). See the buildBody note for the value-format rules and how to verify.
-- `type` (String) River type. One of: "source_to_target", "logic", "actions", "connector_executor".
+- `properties_json` (String) The data flow properties object as JSON — must include a properties_type discriminator and (for logic flows) a non-empty logic_steps array. This value is config-authoritative: the API enriches it on write (logic_steps gain step_id/is_enabled/…), so the provider keeps your configured value and does not refresh it from the API. Drift inside this blob is therefore not detected. NATIVE CONNECTORS (run_type="multi_tables", is_native — e.g. github): their required Source Settings live under source.additional_settings.interface_parameters.source[] and are NOT validated by this provider. Discover the mandatory ones with GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry in cross_reports_predefined[] with "required": true must be supplied (e.g. github requires organization AND repositories). See the buildBody note for the value-format rules and how to verify.
+- `type` (String) Data flow type. One of: "source_to_target", "logic", "actions", "connector_executor".
 
 ### Optional
 
-- `activate` (Boolean) Whether to activate (enable) the data flow after create or update. When true the provider runs: disable (if already active) → update → activate. The disable+update step initialises the fire-service task entry that the activate_river API requires — rivers created via the API lack this entry until their first PUT, so setting activate = true here is the correct way to enable a freshly-created data flow.
+- `activate` (Boolean) Whether to activate (enable) the data flow after create or update. When true the provider runs: disable (if already active) → update → activate. The disable+update step initialises the fire-service task entry that the activate_river API requires — data flows created via the API lack this entry until their first PUT, so setting activate = true here is the correct way to enable a freshly-created data flow.
 - `description` (String) Description. Stored under the API's metadata.description (a top-level description is rejected).
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.
-- `kind` (String) River kind. Defaults to "main_river".
-- `schedulers_json` (String) The river schedule as a JSON array, sent top-level as "schedulers". Each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC river without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for non-CDC flows. Config-authoritative like properties_json/settings_json: the provider keeps your configured value and does not refresh it from the API.
-- `settings_json` (String) The river settings object as JSON. Defaults to an empty object. Config-authoritative like properties_json (the API adds a notification block on write); the provider does not refresh it from the API.
+- `kind` (String) Data flow kind. Defaults to "main_river".
+- `schedulers_json` (String) The data flow schedule as a JSON array, sent top-level as "schedulers". Each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC data flow without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for non-CDC flows. Config-authoritative like properties_json/settings_json: the provider keeps your configured value and does not refresh it from the API.
+- `settings_json` (String) The data flow settings object as JSON. Defaults to an empty object. Config-authoritative like properties_json (the API adds a notification block on write); the provider does not refresh it from the API.
 
 ### Read-Only
 
 - `id` (String) Data flow ID (cross_id), assigned by the API.
-- `step_ids` (List of String) Stable step IDs for logic river steps, auto-generated on first create and preserved across updates. The provider injects these into the logic_steps array before each API write so step_id does not need to appear in properties_json. Positional: index 0 corresponds to the first step, index 1 to the second, etc. Non-logic rivers always have an empty list.
+- `step_ids` (List of String) Stable step IDs for logic data flow steps, auto-generated on first create and preserved across updates. The provider injects these into the logic_steps array before each API write so step_id does not need to appear in properties_json. Positional: index 0 corresponds to the first step, index 1 to the second, etc. Non-logic data flows always have an empty list.

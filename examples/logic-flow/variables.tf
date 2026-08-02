@@ -28,16 +28,16 @@ variable "group_id" {
   default     = null
 }
 
-# ── Logic river ───────────────────────────────────────────────────────────────
-variable "river_name" {
+# ── Logic data flow ─────────────────────────────────────────────────────────
+variable "data_flow_name" {
   type        = string
-  description = "Name for the logic river (data flow)."
+  description = "Name for the logic data flow."
   default     = "TF_logic_multistep"
 }
 
-variable "sub_river_id" {
+variable "sub_data_flow_id" {
   type        = string
-  description = "cross_id of an existing river to run as the first (river) step."
+  description = "cross_id of an existing data flow to run as the first (river) step."
 }
 
 # ── Python (logicode) step — optional ──────────────────────────────────────────

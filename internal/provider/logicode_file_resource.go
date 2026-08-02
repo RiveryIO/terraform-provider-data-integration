@@ -42,7 +42,7 @@ func (r *logicodeFileResource) Metadata(_ context.Context, req resource.Metadata
 
 func (r *logicodeFileResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A logicode (Python) script file for use in logic-river logicode steps. " +
+		Description: "A logicode (Python) script file for use in logic data flow logicode steps. " +
 			"The API is create+read only — DELETE and PUT both return 405. " +
 			"Any change to filename or content forces a new resource (new file_id). " +
 			"On destroy, TF removes the resource from state only; the file remains in S3.",

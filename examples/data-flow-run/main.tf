@@ -10,7 +10,7 @@ provider "boomi" {
   # api_url / token / account_id / environment_id from DATA_INTEGRATION_* env vars
 }
 
-# Run an existing data flow (river) through Terraform. This models the API's
+# Run an existing data flow through Terraform. This models the API's
 # imperative activate_river + run actions as a resource (Terraform provider
 # Actions require Terraform >= 1.14, so a resource is the portable form).
 resource "boomi_data_integration_data_flow_run" "nightly" {
@@ -21,13 +21,13 @@ resource "boomi_data_integration_data_flow_run" "nightly" {
   triggers = {
     # run on every apply:
     ts = timestamp()
-    # or gate on upstream config: config_hash = sha1(jsonencode(local.river_props))
+    # or gate on upstream config: config_hash = sha1(jsonencode(local.data_flow_props))
   }
 }
 
 variable "data_flow_id" {
   type        = string
-  description = "cross_id of the data flow (river) to run."
+  description = "cross_id of the data flow to run."
 }
 
 output "run_id" {

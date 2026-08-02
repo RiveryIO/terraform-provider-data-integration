@@ -1,21 +1,21 @@
-# Multi-step logic river authored with the riveryio/data-integration provider.
+# Multi-step logic data flow authored with the riveryio/data-integration provider.
 #
-# A logic river orchestrates other steps in order. This example builds a
+# A logic data flow orchestrates other steps in order. This example builds a
 # `run_once` container with up to three step types:
 #
-#   1. river               — run an existing river (e.g. the source-to-target river)
+#   1. river                — run an existing data flow (e.g. the source-to-target data flow)
 #   2. logicode (python)    — run a Python step  [optional; see the file_id note below]
 #   3. <warehouse>_sql_query — a SQL / DB transformation writing to a warehouse table
 #
-# The river body is opaque JSON (`properties_json`), so this config emits the
+# The data flow body is opaque JSON (`properties_json`), so this config emits the
 # exact step shapes the Data Integration API accepts (matching logic_builder.py).
 #
 # NOTE on the Python step: the API cannot upload code; a `logicode` step must
 # reference a `file_id` of an already-uploaded code file (from the UI editor or
-# another river). Leave `python_file_id` empty (the default) to omit the Python
+# another data flow). Leave `python_file_id` empty (the default) to omit the Python
 # step; set it to a real file_id to include it.
 #
-# NOTE on group_id: logic rivers that use a shared warehouse connection (the
+# NOTE on group_id: logic data flows that use a shared warehouse connection (the
 # Snowflake SQL step below) must set `group_id` to the environment's group
 # cross_id, or the connection fails to route at run time (misleading 404). The
 # provider exposes `group_id` on the data flow for exactly this reason.
@@ -52,11 +52,11 @@ resource "boomi_data_integration_connection" "snowflake" {
 }
 
 locals {
-  # Step 1: run the existing (source-to-target) river.
-  river_step = {
-    name            = "run-s2t-subriver"
+  # Step 1: run the existing (source-to-target) data flow.
+  data_flow_step = {
+    name            = "run-s2t-subflow"
     type            = "river"
-    river_id        = var.sub_river_id
+    river_id        = var.sub_data_flow_id
     input_variables = {}
     is_enabled      = true
     disable_errors  = false
@@ -92,14 +92,14 @@ locals {
     }
   }
 
-  # Assemble the ordered pipeline: river -> (python) -> snowflake SQL.
-  steps = concat([local.river_step], local.python_steps, [local.sql_step])
+  # Assemble the ordered pipeline: data flow -> (python) -> snowflake SQL.
+  steps = concat([local.data_flow_step], local.python_steps, [local.sql_step])
 }
 
 resource "boomi_data_integration_data_flow" "logic" {
   environment_id = var.environment_id
-  name           = var.river_name
-  description    = "Multi-step logic river (run sub-river -> optional python -> Snowflake SQL transform), managed by terraform-provider-data-integration"
+  name           = var.data_flow_name
+  description    = "Multi-step logic data flow (run sub-data-flow -> optional python -> Snowflake SQL transform), managed by terraform-provider-data-integration"
   type           = "logic"
   kind           = "main_river"
 
@@ -123,8 +123,8 @@ resource "boomi_data_integration_data_flow" "logic" {
   })
 }
 
-output "logic_river_id" {
-  description = "cross_id of the created logic river."
+output "logic_data_flow_id" {
+  description = "cross_id of the created logic data flow."
   value       = boomi_data_integration_data_flow.logic.id
 }
 
