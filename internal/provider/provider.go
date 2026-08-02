@@ -143,7 +143,7 @@ func (p *dataIntegrationProvider) Resources(_ context.Context) []func() resource
 		NewDataFrameResource,
 		NewLogicodeFileResource,
 		NewVariableResource,
-		NewRiverVariablesResource,
+		NewDataFlowVariablesResource,
 		NewCDCConfigResource,
 	}
 }
@@ -157,7 +157,7 @@ func (p *dataIntegrationProvider) DataSources(_ context.Context) []func() dataso
 		NewTargetMetadataDataSource,
 		NewSourceTypesDataSource,
 		NewTargetTypesDataSource,
-		NewRiverGroupDataSource,
+		NewDataFlowGroupDataSource,
 	}
 }
 

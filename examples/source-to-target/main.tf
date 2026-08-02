@@ -13,11 +13,12 @@ provider "boomi" {
   # environment_id = var.environment_id
 }
 
-# A source-to-target river ("data flow") moves tables from a source connection
-# into a target connection. Unlike a logic river (see ../main.tf), its type is
-# "source_to_target" and its properties describe a source, a target, and the
-# schemas/tables to move. The provider passes properties_json through to the API
-# verbatim, so this file emits the API body shape directly.
+# A source-to-target data flow (the API calls this a "river") moves tables from
+# a source connection into a target connection. Unlike a logic data flow (see
+# ../main.tf), its type is "source_to_target" and its properties describe a
+# source, a target, and the schemas/tables to move. The provider passes
+# properties_json through to the API verbatim, so this file emits the API body
+# shape directly.
 #
 # Verified end-to-end on a devbox (MySQL gold DB -> PostgreSQL): 75 rows across
 # four tables.
@@ -60,14 +61,14 @@ resource "boomi_connection" "target" {
   })
 }
 
-# --- The source-to-target river ---
+# --- The source-to-target data flow ---
 # NB: the API's Postgres target name is "postgres_rds", not "postgres".
 resource "boomi_data_flow" "mysql_to_postgres" {
   environment_id = var.environment_id
   name           = "example-mysql-to-postgres"
   type           = "source_to_target"
   kind           = "main_river"
-  description    = "Example MySQL -> PostgreSQL source-to-target river"
+  description    = "Example MySQL -> PostgreSQL source-to-target data flow"
 
   settings_json = jsonencode({ run_timeout_seconds = 180 })
 
@@ -96,7 +97,7 @@ resource "boomi_data_flow" "mysql_to_postgres" {
 
 variable "environment_id" {
   type        = string
-  description = "Existing environment id to create the connections + river in."
+  description = "Existing environment id to create the connections + data flow in."
 }
 
 variable "mysql_host" {
@@ -154,6 +155,6 @@ variable "s3_region" {
   default = "us-east-2"
 }
 
-output "river_id" {
+output "data_flow_id" {
   value = boomi_data_flow.mysql_to_postgres.id
 }

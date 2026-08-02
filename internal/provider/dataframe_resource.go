@@ -46,9 +46,9 @@ func (r *dataFrameResource) Metadata(_ context.Context, req resource.MetadataReq
 
 func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A Data Integration dataframe — a named parquet store used by logicode (Python) rivers.\n\n" +
+		Description: "A Data Integration dataframe — a named parquet store used by logicode (Python) data flows.\n\n" +
 			"Two storage types exist:\n" +
-			"  • **Internal** (river-managed): omit `connection_settings`. " +
+			"  • **Internal** (data-flow-managed): omit `connection_settings`. " +
 			"Rivery allocates the S3 path automatically and injects STS credentials at runtime. " +
 			"The only creation requirement is `name`.\n" +
 			"  • **File-zone** (custom): include `connection_settings` pointing to a " +
@@ -75,7 +75,7 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				Required: true,
 				Description: "Dataframe name — must be unique within the environment and must match the " +
-					"import name used in the river's Python code (`from rivery_dataframes import <name>`). " +
+					"import name used in the data flow's Python code (`from rivery_dataframes import <name>`). " +
 					"The API does not support renaming, so changing it forces a new dataframe.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
@@ -83,7 +83,7 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional: true,
 				Computed: true,
 				Description: "Storage connection for a file-zone (custom) dataframe. " +
-					"Omit this block to create an internal (river-managed) dataframe whose S3 path and " +
+					"Omit this block to create an internal (data-flow-managed) dataframe whose S3 path and " +
 					"credentials are managed by Rivery automatically. " +
 					"When present, this block is the only field the API allows to be updated in place.",
 				Attributes: map[string]schema.Attribute{

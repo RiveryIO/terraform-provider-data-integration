@@ -43,7 +43,7 @@ func (r *cdcConfigResource) Metadata(_ context.Context, req resource.MetadataReq
 
 func (r *cdcConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The CDC offset configuration for a CDC data flow (river) — the source position " +
+		Description: "The CDC offset configuration for a CDC data flow — the source position " +
 			"the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, " +
 			"oracle scn). NOTE: the offset is operational state that advances every run, so this " +
 			"resource is config-authoritative (drift inside config_json is not reconciled); use it to " +
@@ -51,7 +51,7 @@ func (r *cdcConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
-				Description:   "Resource id. Equals data_flow_id (one CDC config per river).",
+				Description:   "Resource id. Equals data_flow_id (one CDC config per data flow).",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"environment_id": schema.StringAttribute{
@@ -66,7 +66,7 @@ func (r *cdcConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"data_flow_id": schema.StringAttribute{
 				Required:      true,
-				Description:   "cross_id of the CDC data flow (river) this offset belongs to. Changing it forces a new resource.",
+				Description:   "cross_id of the CDC data flow this offset belongs to. Changing it forces a new resource.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"config_json": schema.StringAttribute{
@@ -140,7 +140,7 @@ func (r *cdcConfigResource) Delete(ctx context.Context, req resource.DeleteReque
 }
 
 func (r *cdcConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	envID, riverID, err := splitImportID(req.ID)
+	envID, dataFlowID, err := splitImportID(req.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid import ID", err.Error())
 		return
@@ -153,8 +153,8 @@ func (r *cdcConfigResource) ImportState(ctx context.Context, req resource.Import
 			"Use \"<environment_id>/<data_flow_id>\" or set environment_id on the provider.")
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), riverID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("data_flow_id"), riverID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), dataFlowID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("data_flow_id"), dataFlowID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), envID)...)
 }
 

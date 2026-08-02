@@ -58,7 +58,7 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 	resp.Schema = schema.Schema{
 		Description: "A Data Integration data flow (the API calls this a \"river\"). The flow " +
 			"definition is supplied as JSON via properties_json; this keeps the resource forward-" +
-			"compatible with the full river schema without re-modelling every field.",
+			"compatible with the full data flow schema without re-modelling every field.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -83,11 +83,11 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString("main_river"),
-				Description: "River kind. Defaults to \"main_river\".",
+				Description: "Data flow kind. Defaults to \"main_river\".",
 			},
 			"type": schema.StringAttribute{
 				Required:    true,
-				Description: "River type. One of: \"source_to_target\", \"logic\", \"actions\", \"connector_executor\".",
+				Description: "Data flow type. One of: \"source_to_target\", \"logic\", \"actions\", \"connector_executor\".",
 			},
 			"description": schema.StringAttribute{
 				Optional:    true,
@@ -96,7 +96,7 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"properties_json": schema.StringAttribute{
 				Required:   true,
 				CustomType: jsontypes.NormalizedType{},
-				Description: "The river properties object as JSON — must include a properties_type " +
+				Description: "The data flow properties object as JSON — must include a properties_type " +
 					"discriminator and (for logic flows) a non-empty logic_steps array. This value " +
 					"is config-authoritative: the API enriches it on write (logic_steps gain " +
 					"step_id/is_enabled/…), so the provider keeps your configured value and does not " +
@@ -114,17 +114,17 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:   true,
 				CustomType: jsontypes.NormalizedType{},
 				Default:    stringdefault.StaticString("{}"),
-				Description: "The river settings object as JSON. Defaults to an empty object. " +
+				Description: "The data flow settings object as JSON. Defaults to an empty object. " +
 					"Config-authoritative like properties_json (the API adds a notification block " +
 					"on write); the provider does not refresh it from the API.",
 			},
 			"schedulers_json": schema.StringAttribute{
 				Optional:   true,
 				CustomType: jsontypes.NormalizedType{},
-				Description: "The river schedule as a JSON array, sent top-level as \"schedulers\". " +
+				Description: "The data flow schedule as a JSON array, sent top-level as \"schedulers\". " +
 					"Each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
 					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
-					"river without an enabled scheduler (\"Please schedule a CDC data flow before enabling " +
+					"data flow without an enabled scheduler (\"Please schedule a CDC data flow before enabling " +
 					"or creating\"), and the cron must run between once per day and 12 times per hour " +
 					"(i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for " +
 					"non-CDC flows. Config-authoritative like properties_json/settings_json: the provider " +
@@ -145,18 +145,18 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "Whether to activate (enable) the data flow after create or update. " +
 					"When true the provider runs: disable (if already active) → update → activate. " +
 					"The disable+update step initialises the fire-service task entry that the " +
-					"activate_river API requires — rivers created via the API lack this entry until " +
+					"activate API requires — data flows created via the API lack this entry until " +
 					"their first PUT, so setting activate = true here is the correct way to enable a " +
 					"freshly-created data flow.",
 			},
 			"step_ids": schema.ListAttribute{
 				ElementType: types.StringType,
 				Computed:    true,
-				Description: "Stable step IDs for logic river steps, auto-generated on first create " +
+				Description: "Stable step IDs for logic data flow steps, auto-generated on first create " +
 					"and preserved across updates. The provider injects these into the logic_steps " +
 					"array before each API write so step_id does not need to appear in properties_json. " +
 					"Positional: index 0 corresponds to the first step, index 1 to the second, etc. " +
-					"Non-logic rivers always have an empty list.",
+					"Non-logic data flows always have an empty list.",
 				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
 			},
 		},
@@ -198,8 +198,8 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 
 	if plan.Activate.ValueBool() {
 		// A PUT after POST initialises the fire-service task entry that
-		// activate_river requires. Without this step, activation always fails
-		// with RVR-ACTIVATE-500 for API-created rivers.
+		// the activate operation requires. Without this step, activation always fails
+		// with RVR-ACTIVATE-500 for API-created data flows.
 		if _, err2 := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error initialising data flow before activation", err2)
 			return
@@ -255,7 +255,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	if switchingToCDC {
 		// When the config supplies schedulers_json, buildBody has already set it and
 		// that takes precedence. Otherwise fall back to the schedulers currently on
-		// the river so the CDC validator still passes.
+		// the data flow so the CDC validator still passes.
 		if _, hasSchedulers := body["schedulers"]; !hasSchedulers {
 			current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
 			if err != nil {
@@ -269,7 +269,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if plan.Activate.ValueBool() {
-		// Disable before editing — the API requires the river to be inactive
+		// Disable before editing — the API requires the data flow to be inactive
 		// during a PUT when it was previously active.
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
@@ -291,8 +291,8 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// After switching to CDC, enable_cdc must be called before the river can run.
-	// This is a one-time operation that sets ENABLE_LOG=true on the river.
+	// After switching to CDC, CDC must be enabled before the data flow can run.
+	// This is a one-time operation that sets ENABLE_LOG=true on the data flow.
 	if switchingToCDC {
 		resp.Diagnostics.Append(r.enableCDC(ctx, envID, plan.ID.ValueString())...)
 		if resp.Diagnostics.HasError() {
@@ -301,7 +301,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if plan.Activate.ValueBool() {
-		// CDC rivers take longer to activate after enable_cdc — use the extended timeout.
+		// CDC data flows take longer to activate after enabling CDC — use the extended timeout.
 		activateTimeout := dataFlowOpTimeout
 		if switchingToCDC {
 			activateTimeout = cdcEnableOpTimeout
@@ -364,8 +364,8 @@ const dataFlowOpTimeout = 5 * time.Minute
 const cdcEnableOpTimeout = 10 * time.Minute
 
 // activateFlow calls activate and polls the async operation.
-// Pass timeout=cdcEnableOpTimeout when activating immediately after enable_cdc,
-// since CDC rivers take longer to reach ACTIVE state.
+// Pass timeout=cdcEnableOpTimeout when activating immediately after enabling CDC,
+// since CDC data flows take longer to reach ACTIVE state.
 func (r *dataFlowResource) activateFlow(ctx context.Context, envID, id string, timeout time.Duration) diag.Diagnostics {
 	var diags diag.Diagnostics
 	opID, err := r.data.client.ActivateDataFlow(ctx, envID, id)
@@ -379,8 +379,8 @@ func (r *dataFlowResource) activateFlow(ctx context.Context, envID, id string, t
 	return diags
 }
 
-// enableCDC calls the enable_cdc endpoint and polls the async operation.
-// Required after switching a river to extract_method=log before it can run.
+// enableCDC calls the CDC-enable endpoint and polls the async operation.
+// Required after switching a data flow to extract_method=log before it can run.
 // Uses a longer timeout since the operation sets up CDC binlog readers and
 // can take several minutes.
 func (r *dataFlowResource) enableCDC(ctx context.Context, envID, id string) diag.Diagnostics {
@@ -479,13 +479,13 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	}
 	// schedulers is a top-level list on the write body. It is mandatory for CDC
 	// (log-based) flows — the API validates that an enabled scheduler is present
-	// before it will create or enable a CDC river.
+	// before it will create or enable a CDC data flow.
 	//
 	// NATIVE-CONNECTOR SOURCE SETTINGS (verify checklist) — properties_json is
 	// opaque to this provider, so nothing here validates that a native connector's
 	// required "Source Settings" are present. They are the fields the console shows
 	// under "Source Settings — Connector settings applied to every report" (marked
-	// with a red *). A river created without them saves fine but is unusable (the UI
+	// with a red *). A data flow created without them saves fine but is unusable (the UI
 	// shows the required dropdowns empty; a run has no scope). To author one correctly:
 	//
 	//  1. Identify a native connector: its data_source_types entry has is_native=true
@@ -502,7 +502,7 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	//     - value format follows the descriptor type: list_api_single_id →
 	//       one API-resolved id, list_api_multiple_id → a list of API-resolved ids
 	//       (NOT raw display strings), input_text → the literal string.
-	//  4. Verify: after apply, GET the river and confirm interface_parameters.source
+	//  4. Verify: after apply, GET the data flow and confirm interface_parameters.source
 	//     round-trips, and that the console Source tab pre-selects the values (not
 	//     "Select..."). A test-connection on the source connection is recommended too.
 	if !plan.SchedulersJSON.IsNull() && !plan.SchedulersJSON.IsUnknown() {
@@ -583,7 +583,7 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 		}
 	}
 	// schedulers_json is Optional (not Computed), so an unset config is null. Only
-	// seed it from the API when it is null AND the river actually carries a
+	// seed it from the API when it is null AND the data flow actually carries a
 	// scheduler — i.e. on import. Never populate from an empty API list, which
 	// would turn a legitimately-null config into "[]" and break plan==apply
 	// consistency on create.

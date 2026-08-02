@@ -18,19 +18,19 @@ import (
 )
 
 var (
-	_ resource.Resource                = (*riverVariablesResource)(nil)
-	_ resource.ResourceWithConfigure   = (*riverVariablesResource)(nil)
-	_ resource.ResourceWithImportState = (*riverVariablesResource)(nil)
+	_ resource.Resource                = (*dataFlowVariablesResource)(nil)
+	_ resource.ResourceWithConfigure   = (*dataFlowVariablesResource)(nil)
+	_ resource.ResourceWithImportState = (*dataFlowVariablesResource)(nil)
 )
 
-func NewRiverVariablesResource() resource.Resource { return &riverVariablesResource{} }
+func NewDataFlowVariablesResource() resource.Resource { return &dataFlowVariablesResource{} }
 
-type riverVariablesResource struct {
+type dataFlowVariablesResource struct {
 	data *providerData
 }
 
-// riverVariableModel is the Terraform schema model for one variable block.
-type riverVariableModel struct {
+// dataFlowVariableModel is the Terraform schema model for one variable block.
+type dataFlowVariableModel struct {
 	Name              types.String `tfsdk:"name"`
 	Value             types.String `tfsdk:"value"`
 	IsMultiValue      types.Bool   `tfsdk:"is_multi_value"`
@@ -38,15 +38,15 @@ type riverVariableModel struct {
 	ClearValueOnStart types.Bool   `tfsdk:"clear_value_on_start"`
 }
 
-// riverVariablesModel is the top-level resource model.
-type riverVariablesModel struct {
+// dataFlowVariablesModel is the top-level resource model.
+type dataFlowVariablesModel struct {
 	ID            types.String `tfsdk:"id"`
 	EnvironmentID types.String `tfsdk:"environment_id"`
-	RiverID       types.String `tfsdk:"river_id"`
+	DataFlowID    types.String `tfsdk:"data_flow_id"`
 	Variables     types.List   `tfsdk:"variable"`
 }
 
-var riverVariableAttrTypes = map[string]attr.Type{
+var dataFlowVariableAttrTypes = map[string]attr.Type{
 	"name":                 types.StringType,
 	"value":                types.StringType,
 	"is_multi_value":       types.BoolType,
@@ -54,13 +54,13 @@ var riverVariableAttrTypes = map[string]attr.Type{
 	"clear_value_on_start": types.BoolType,
 }
 
-func (r *riverVariablesResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_river_variables"
+func (r *dataFlowVariablesResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_data_flow_variables"
 }
 
-func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *dataFlowVariablesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the full set of variables for a single river. Uses replace-all " +
+		Description: "Manages the full set of variables for a single data flow. Uses replace-all " +
 			"semantics: variables not listed in this resource are deleted. Encrypted variable " +
 			"values are written as plaintext and stored as the stable API-returned ciphertext " +
 			"in state; drift detection works because the ciphertext only changes when a new " +
@@ -68,27 +68,27 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
-				Description:   "Resource ID. Equals <environment_id>/<river_id>.",
+				Description:   "Resource ID. Equals <environment_id>/<data_flow_id>.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"environment_id": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Environment the river belongs to. Falls back to the provider-level environment_id.",
+				Description: "Environment the data flow belongs to. Falls back to the provider-level environment_id.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"river_id": schema.StringAttribute{
+			"data_flow_id": schema.StringAttribute{
 				Required:      true,
-				Description:   "Cross-ID of the river whose variables this resource manages. Changing it forces a new resource.",
+				Description:   "Cross-ID of the data flow whose variables this resource manages. Changing it forces a new resource.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 		},
 		Blocks: map[string]schema.Block{
 			"variable": schema.ListNestedBlock{
-				Description: "A river variable. Order is preserved as returned by the API.",
+				Description: "A data flow variable. Order is preserved as returned by the API.",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -126,12 +126,12 @@ func (r *riverVariablesResource) Schema(_ context.Context, _ resource.SchemaRequ
 	}
 }
 
-func (r *riverVariablesResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *dataFlowVariablesResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.data = configureProviderData(req, resp)
 }
 
 // valueToString serialises the API's any-typed value to the string stored in state.
-func valueToString(v client.RiverVariable) (string, error) {
+func valueToString(v client.DataFlowVariable) (string, error) {
 	if v.Settings.IsMultiValue {
 		b, err := json.Marshal(v.Value)
 		if err != nil {
@@ -165,8 +165,8 @@ func jsonNormalize(s string) string {
 
 // modelToAPI converts the TF variable blocks to the API request body items.
 // The value string is decoded appropriately for each variable type.
-func modelToAPI(vars []riverVariableModel) ([]client.RiverVariable, error) {
-	items := make([]client.RiverVariable, 0, len(vars))
+func modelToAPI(vars []dataFlowVariableModel) ([]client.DataFlowVariable, error) {
+	items := make([]client.DataFlowVariable, 0, len(vars))
 	for _, v := range vars {
 		var apiVal any
 		if v.IsMultiValue.ValueBool() {
@@ -178,9 +178,9 @@ func modelToAPI(vars []riverVariableModel) ([]client.RiverVariable, error) {
 		} else {
 			apiVal = v.Value.ValueString()
 		}
-		items = append(items, client.RiverVariable{
+		items = append(items, client.DataFlowVariable{
 			Name: v.Name.ValueString(),
-			Settings: client.RiverVariableSettings{
+			Settings: client.DataFlowVariableSettings{
 				ClearValueOnStart: v.ClearValueOnStart.ValueBool(),
 				IsMultiValue:      v.IsMultiValue.ValueBool(),
 				IsEncrypted:       v.IsEncrypted.ValueBool(),
@@ -191,8 +191,8 @@ func modelToAPI(vars []riverVariableModel) ([]client.RiverVariable, error) {
 	return items, nil
 }
 
-func (r *riverVariablesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan riverVariablesModel
+func (r *dataFlowVariablesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan dataFlowVariablesModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -205,7 +205,7 @@ func (r *riverVariablesResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	var varBlocks []riverVariableModel
+	var varBlocks []dataFlowVariableModel
 	resp.Diagnostics.Append(plan.Variables.ElementsAs(ctx, &varBlocks, false)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -217,10 +217,10 @@ func (r *riverVariablesResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	riverID := plan.RiverID.ValueString()
-	result, err := r.data.client.PutRiverVariables(ctx, envID, riverID, items)
+	dataFlowID := plan.DataFlowID.ValueString()
+	result, err := r.data.client.PutDataFlowVariables(ctx, envID, dataFlowID, items)
 	if err != nil {
-		addAPIError(&resp.Diagnostics, "Error creating river variables", err)
+		addAPIError(&resp.Diagnostics, "Error creating data flow variables", err)
 		return
 	}
 
@@ -228,25 +228,25 @@ func (r *riverVariablesResource) Create(ctx context.Context, req resource.Create
 	// (e.g. "[1, 2]" vs "[1,2]") and the plaintext/ciphertext mismatch for encrypted vars.
 	_ = result // confirmed the PUT succeeded; state is sourced from the plan
 
-	plan.ID = types.StringValue(envID + "/" + riverID)
+	plan.ID = types.StringValue(envID + "/" + dataFlowID)
 	plan.EnvironmentID = types.StringValue(envID)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *riverVariablesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state riverVariablesModel
+func (r *dataFlowVariablesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state dataFlowVariablesModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	items, err := r.data.client.ListRiverVariables(ctx, state.EnvironmentID.ValueString(), state.RiverID.ValueString())
+	items, err := r.data.client.ListDataFlowVariables(ctx, state.EnvironmentID.ValueString(), state.DataFlowID.ValueString())
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		addAPIError(&resp.Diagnostics, "Error reading river variables", err)
+		addAPIError(&resp.Diagnostics, "Error reading data flow variables", err)
 		return
 	}
 
@@ -255,7 +255,7 @@ func (r *riverVariablesResource) Read(ctx context.Context, req resource.ReadRequ
 	// if the user changed their config plaintext we see a diff on the value attribute.
 	// Build a name→stateValue map for the lookup.
 	stateVars := map[string]string{}
-	var stateBlocks []riverVariableModel
+	var stateBlocks []dataFlowVariableModel
 	resp.Diagnostics.Append(state.Variables.ElementsAs(ctx, &stateBlocks, false)...)
 	if !resp.Diagnostics.HasError() {
 		for _, v := range stateBlocks {
@@ -293,7 +293,7 @@ func (r *riverVariablesResource) Read(ctx context.Context, req resource.ReadRequ
 				return
 			}
 		}
-		obj, diags := types.ObjectValue(riverVariableAttrTypes, map[string]attr.Value{
+		obj, diags := types.ObjectValue(dataFlowVariableAttrTypes, map[string]attr.Value{
 			"name":                 types.StringValue(v.Name),
 			"value":                types.StringValue(valStr),
 			"is_multi_value":       types.BoolValue(v.Settings.IsMultiValue),
@@ -306,7 +306,7 @@ func (r *riverVariablesResource) Read(ctx context.Context, req resource.ReadRequ
 		}
 		elems = append(elems, obj)
 	}
-	listVal, diags := types.ListValue(types.ObjectType{AttrTypes: riverVariableAttrTypes}, elems)
+	listVal, diags := types.ListValue(types.ObjectType{AttrTypes: dataFlowVariableAttrTypes}, elems)
 	if diags.HasError() {
 		resp.Diagnostics.AddError("Error building variable list", diags.Errors()[0].Detail())
 		return
@@ -316,14 +316,14 @@ func (r *riverVariablesResource) Read(ctx context.Context, req resource.ReadRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *riverVariablesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan riverVariablesModel
+func (r *dataFlowVariablesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan dataFlowVariablesModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	var varBlocks []riverVariableModel
+	var varBlocks []dataFlowVariableModel
 	resp.Diagnostics.Append(plan.Variables.ElementsAs(ctx, &varBlocks, false)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -335,9 +335,9 @@ func (r *riverVariablesResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	result, err := r.data.client.PutRiverVariables(ctx, plan.EnvironmentID.ValueString(), plan.RiverID.ValueString(), items)
+	result, err := r.data.client.PutDataFlowVariables(ctx, plan.EnvironmentID.ValueString(), plan.DataFlowID.ValueString(), items)
 	if err != nil {
-		addAPIError(&resp.Diagnostics, "Error updating river variables", err)
+		addAPIError(&resp.Diagnostics, "Error updating data flow variables", err)
 		return
 	}
 
@@ -345,27 +345,27 @@ func (r *riverVariablesResource) Update(ctx context.Context, req resource.Update
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *riverVariablesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state riverVariablesModel
+func (r *dataFlowVariablesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state dataFlowVariablesModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if _, err := r.data.client.PutRiverVariables(ctx, state.EnvironmentID.ValueString(), state.RiverID.ValueString(), []client.RiverVariable{}); err != nil {
+	if _, err := r.data.client.PutDataFlowVariables(ctx, state.EnvironmentID.ValueString(), state.DataFlowID.ValueString(), []client.DataFlowVariable{}); err != nil {
 		if !errors.Is(err, client.ErrNotFound) {
-			addAPIError(&resp.Diagnostics, "Error deleting river variables", err)
+			addAPIError(&resp.Diagnostics, "Error deleting data flow variables", err)
 		}
 	}
 }
 
-// ImportState accepts "<environment_id>/<river_id>".
-func (r *riverVariablesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+// ImportState accepts "<environment_id>/<data_flow_id>".
+func (r *dataFlowVariablesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.SplitN(req.ID, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		resp.Diagnostics.AddError("Invalid import ID", "Use \"<environment_id>/<river_id>\".")
+		resp.Diagnostics.AddError("Invalid import ID", "Use \"<environment_id>/<data_flow_id>\".")
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), parts[0])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("river_id"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("data_flow_id"), parts[1])...)
 }

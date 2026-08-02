@@ -23,7 +23,7 @@ var (
 )
 
 // activationTimeout bounds how long Create waits for an asynchronous
-// activate_river operation to finish before triggering the run.
+// activation operation to finish before triggering the run.
 const activationTimeout = 2 * time.Minute
 
 // NewDataFlowRunResource is the factory registered with the provider.
@@ -49,8 +49,8 @@ func (r *dataFlowRunResource) Metadata(_ context.Context, req resource.MetadataR
 
 func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Triggers a run of a data flow (river) on apply — the Terraform-native way to " +
-			"execute the underlying API's activate_river + run actions. This is an imperative action " +
+		Description: "Triggers a run of a data flow on apply — the Terraform-native way to " +
+			"execute the underlying API's activate + run actions. This is an imperative action " +
 			"modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it " +
 			"fires one run; change `triggers` (or replace the resource) to fire another. It does not " +
 			"track run status or reconcile anything on refresh, and destroying it does not cancel or " +
@@ -73,7 +73,7 @@ func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"data_flow_id": schema.StringAttribute{
 				Required:      true,
-				Description:   "cross_id of the data flow (river) to run. Changing it forces a new run.",
+				Description:   "cross_id of the data flow to run. Changing it forces a new run.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"activate": schema.BoolAttribute{
@@ -81,7 +81,7 @@ func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Computed: true,
 				Default:  booldefault.StaticBool(true),
 				Description: "Whether to activate (enable) the data flow before running it. Defaults to " +
-					"true. Rivers are created disabled, so the first run needs activation. Changing it " +
+					"true. Data flows are created disabled, so the first run needs activation. Changing it " +
 					"forces a new run.",
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
 			},
@@ -124,12 +124,12 @@ func (r *dataFlowRunResource) Create(ctx context.Context, req resource.CreateReq
 			"Set environment_id on the resource or environment_id on the provider.")
 		return
 	}
-	riverID := plan.DataFlowID.ValueString()
+	dataFlowID := plan.DataFlowID.ValueString()
 
-	// Activate first (rivers are created disabled). The API may complete
+	// Activate first (data flows are created disabled). The API may complete
 	// synchronously (empty operation id) or defer via an async operation.
 	if plan.Activate.ValueBool() {
-		opID, err := r.data.client.ActivateDataFlow(ctx, envID, riverID)
+		opID, err := r.data.client.ActivateDataFlow(ctx, envID, dataFlowID)
 		if err != nil {
 			addAPIError(&resp.Diagnostics, "Error activating data flow", err)
 			return
@@ -139,7 +139,7 @@ func (r *dataFlowRunResource) Create(ctx context.Context, req resource.CreateReq
 		}
 	}
 
-	runID, runGroupID, err := r.data.client.RunDataFlow(ctx, envID, riverID)
+	runID, runGroupID, err := r.data.client.RunDataFlow(ctx, envID, dataFlowID)
 	if err != nil {
 		addAPIError(&resp.Diagnostics, "Error running data flow", err)
 		return
@@ -195,12 +195,12 @@ func (r *dataFlowRunResource) waitForOperation(ctx context.Context, envID, opID 
 			return true
 		case "E":
 			diags.AddError("Data flow activation failed",
-				fmt.Sprintf("activate_river operation %s reported an error: %s", opID, errMsg))
+				fmt.Sprintf("activate operation %s reported an error: %s", opID, errMsg))
 			return false
 		}
 		if time.Now().After(deadline) {
 			diags.AddError("Data flow activation timed out",
-				fmt.Sprintf("activate_river operation %s did not finish within %s (last status %q).",
+				fmt.Sprintf("activate operation %s did not finish within %s (last status %q).",
 					opID, activationTimeout, status))
 			return false
 		}

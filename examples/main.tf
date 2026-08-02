@@ -36,7 +36,7 @@ resource "boomi_data_integration_connection" "warehouse" {
 }
 
 # A data flow (the API calls this a "river"). The flow definition is supplied
-# as JSON, keeping the resource forward-compatible with the full river schema.
+# as JSON, keeping the resource forward-compatible with the full data flow schema.
 # It references both the environment and the connection above.
 resource "boomi_data_integration_data_flow" "daily_load" {
   environment_id = boomi_data_integration_environment.prod.id
@@ -50,7 +50,7 @@ resource "boomi_data_integration_data_flow" "daily_load" {
       {
         type            = "river"
         name            = "load-step"
-        river_id        = var.sub_river_id
+        river_id        = var.sub_data_flow_id
         input_variables = {}
       }
     ]
@@ -63,9 +63,9 @@ variable "snowflake_password" {
   default   = ""
 }
 
-variable "sub_river_id" {
+variable "sub_data_flow_id" {
   type        = string
-  description = "cross_id of an existing river used as the logic leaf step"
+  description = "cross_id of an existing data flow used as the logic leaf step"
   default     = ""
 }
 

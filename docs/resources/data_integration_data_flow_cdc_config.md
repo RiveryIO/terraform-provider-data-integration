@@ -3,12 +3,12 @@
 page_title: "boomi_data_integration_data_flow_cdc_config Resource - boomi"
 subcategory: ""
 description: |-
-  The CDC offset configuration for a CDC data flow (river) — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
+  The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
 ---
 
 # boomi_data_integration_data_flow_cdc_config (Resource)
 
-The CDC offset configuration for a CDC data flow (river) — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
+The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
 
 
 
@@ -18,7 +18,7 @@ The CDC offset configuration for a CDC data flow (river) — the source position
 ### Required
 
 - `config_json` (String) The CDC offset object as JSON, including a "datasource_type" discriminator (e.g. {"datasource_type":"mysql","binlog_file":"...","binlog_position":"..."}). Sent to the API wrapped as {"config": <this>}. Config-authoritative: kept from configuration, not refreshed from the API.
-- `data_flow_id` (String) cross_id of the CDC data flow (river) this offset belongs to. Changing it forces a new resource.
+- `data_flow_id` (String) cross_id of the CDC data flow this offset belongs to. Changing it forces a new resource.
 
 ### Optional
 
@@ -26,4 +26,4 @@ The CDC offset configuration for a CDC data flow (river) — the source position
 
 ### Read-Only
 
-- `id` (String) Resource id. Equals data_flow_id (one CDC config per river).
+- `id` (String) Resource id. Equals data_flow_id (one CDC config per data flow).

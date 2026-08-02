@@ -304,7 +304,7 @@ func normalizeID(raw map[string]any) map[string]any {
 	if raw == nil {
 		return raw
 	}
-	// The API exposes id/name/type under resource-specific keys (rivers use
+	// The API exposes id/name/type under resource-specific keys (data flows use
 	// cross_id + name + type; connections use connection_name + connection_type_id;
 	// environments use environment_name). Normalize them to the canonical keys the
 	// resource apply() mappers read, so every resource round-trips cleanly.
@@ -327,7 +327,7 @@ func normalizeField(raw map[string]any, dest string, srcKeys ...string) {
 	}
 }
 
-// ---- Data flows (rivers) ---------------------------------------------------
+// ---- Data flows -------------------------------------------------------------
 
 // ListDataFlows returns every data flow in the environment, handling the
 // paginated { items, next_page, ... } envelope.
@@ -396,7 +396,7 @@ func (c *Client) UpdateDataFlow(ctx context.Context, environmentID, id string, p
 	}
 	// The API rejects PUT with 400 "can not update properties for an active data
 	// flow" if the disable operation hasn't fully settled yet (common for CDC
-	// rivers where 204 disable is asynchronous in practice). Retry a few times.
+	// data flows where 204 disable is asynchronous in practice). Retry a few times.
 	const maxPUTRetries = 5
 	const putRetryDelay = 5 * time.Second
 	var out map[string]any
@@ -415,8 +415,8 @@ func (c *Client) UpdateDataFlow(ctx context.Context, environmentID, id string, p
 	return nil, lastErr
 }
 
-// isActiveFlowError returns true when the API rejected a PUT because the river
-// is still considered active by the backend (happens after a fast 204 disable).
+// isActiveFlowError returns true when the API rejected a PUT because the data
+// flow is still considered active by the backend (happens after a fast 204 disable).
 func isActiveFlowError(err error) bool {
 	if err == nil {
 		return false
@@ -565,7 +565,7 @@ func (c *Client) DeleteEnvironment(ctx context.Context, id string) error {
 
 // ---- Dataframes (environment-scoped, keyed by name) ------------------------
 //
-// Unlike rivers/connections, the dataframes API keys resources by their unique
+// Unlike data flows/connections, the dataframes API keys resources by their unique
 // `name` rather than a cross_id, and the response carries no id field — so the
 // resource uses the name as its Terraform id. Only connection_settings is
 // mutable on update.
@@ -606,7 +606,7 @@ func (c *Client) DeleteDataFrame(ctx context.Context, environmentID, name string
 
 // ---- Logicode files (environment-scoped, keyed by file_id) -----------------
 //
-// Logicode files are Python scripts that back logic-river logicode steps.
+// Logicode files are Python scripts that back logic data flow logicode steps.
 // The API is create+read only — DELETE and PUT both return 405. Any change to
 // filename or content requires creating a new file (new file_id).
 //
@@ -663,33 +663,33 @@ func (c *Client) GetLogicodeFile(ctx context.Context, environmentID, fileID stri
 	return out, nil
 }
 
-// ---- CDC config (river-scoped CDC offset) ----------------------------------
+// ---- CDC config (data-flow-scoped CDC offset) ------------------------------
 //
-// The CDC offset is the source position a CDC river resumes from (mysql binlog,
-// postgres lsn, sqlserver lsn, mongodb resume token, oracle scn). It only exists
-// for a CDC-enabled river that has fetched changes; GET 400s until then. The
-// body shape is { "config": { "datasource_type": "...", <offset fields> } }.
-// Set is a single POST (create == update); there is no PUT.
+// The CDC offset is the source position a CDC data flow resumes from (mysql
+// binlog, postgres lsn, sqlserver lsn, mongodb resume token, oracle scn). It
+// only exists for a CDC-enabled data flow that has fetched changes; GET 400s
+// until then. The body shape is { "config": { "datasource_type": "...",
+// <offset fields> } }. Set is a single POST (create == update); there is no PUT.
 
-// GetCDCConfig fetches a river's CDC offset config. Returns ErrValidation (400)
-// when the river is CDC but no offset has materialized yet.
-func (c *Client) GetCDCConfig(ctx context.Context, environmentID, riverID string) (map[string]any, error) {
+// GetCDCConfig fetches a data flow's CDC offset config. Returns ErrValidation
+// (400) when the data flow is CDC but no offset has materialized yet.
+func (c *Client) GetCDCConfig(ctx context.Context, environmentID, dataFlowID string) (map[string]any, error) {
 	var out map[string]any
-	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), nil, &out); err != nil {
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+dataFlowID+"/cdc_config"), nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// SetCDCConfig sets (creates or overwrites) a river's CDC offset. body must be
-// the full { "config": {...} } envelope.
-func (c *Client) SetCDCConfig(ctx context.Context, environmentID, riverID string, body map[string]any) error {
-	return c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), body, nil)
+// SetCDCConfig sets (creates or overwrites) a data flow's CDC offset. body
+// must be the full { "config": {...} } envelope.
+func (c *Client) SetCDCConfig(ctx context.Context, environmentID, dataFlowID string, body map[string]any) error {
+	return c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+dataFlowID+"/cdc_config"), body, nil)
 }
 
-// DeleteCDCConfig removes a river's CDC offset.
-func (c *Client) DeleteCDCConfig(ctx context.Context, environmentID, riverID string) error {
-	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/rivers/"+riverID+"/cdc_config"), nil, nil)
+// DeleteCDCConfig removes a data flow's CDC offset.
+func (c *Client) DeleteCDCConfig(ctx context.Context, environmentID, dataFlowID string) error {
+	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, "/rivers/"+dataFlowID+"/cdc_config"), nil, nil)
 }
 
 // ---- Environment variables (environment-scoped key/value collection) -------
@@ -727,12 +727,12 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 	return c.request(ctx, http.MethodDelete, c.envPath(environmentID, suffix), nil, nil)
 }
 
-// ---- River variables (river-scoped, replace-all semantics) -----------------
+// ---- Data flow variables (data-flow-scoped, replace-all semantics) ---------
 //
-// River variables are distinct from environment variables. The API exposes only
-// two operations: GET /rivers/{id}/variables (list all) and PUT /rivers/{id}/variables
-// (replace-all — variables omitted from the body are deleted). There is no endpoint
-// for individual variable CRUD.
+// Data flow variables are distinct from environment variables. The API exposes
+// only two operations: GET /rivers/{id}/variables (list all) and PUT
+// /rivers/{id}/variables (replace-all — variables omitted from the body are
+// deleted). There is no endpoint for individual variable CRUD.
 //
 // Encrypted variable handling: PUT accepts plaintext and the API encrypts it.
 // GET returns a stable ciphertext (same value across reads; only changes when a new
@@ -740,41 +740,41 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 // without double-encrypting — enabling read-modify-write cycles without decryption.
 // There is no decrypt API.
 
-// RiverVariableSettings holds the per-variable metadata flags.
-type RiverVariableSettings struct {
+// DataFlowVariableSettings holds the per-variable metadata flags.
+type DataFlowVariableSettings struct {
 	ClearValueOnStart bool `json:"clear_value_on_start"`
 	IsMultiValue      bool `json:"is_multi_value"`
 	IsEncrypted       bool `json:"is_encrypted"`
 }
 
-// RiverVariable is a single item in the river variables collection.
+// DataFlowVariable is a single item in the data flow variables collection.
 // Value is any because the API returns a string for single/encrypted vars and
 // a []any for multi-value vars.
-type RiverVariable struct {
-	Name     string                `json:"name"`
-	Settings RiverVariableSettings `json:"settings"`
-	Value    any                   `json:"value"`
+type DataFlowVariable struct {
+	Name     string                   `json:"name"`
+	Settings DataFlowVariableSettings `json:"settings"`
+	Value    any                      `json:"value"`
 }
 
-type riverVariablesPage struct {
-	Items []RiverVariable `json:"items"`
+type dataFlowVariablesPage struct {
+	Items []DataFlowVariable `json:"items"`
 }
 
-// ListRiverVariables returns all variables for a river.
-func (c *Client) ListRiverVariables(ctx context.Context, environmentID, riverID string) ([]RiverVariable, error) {
-	var out riverVariablesPage
-	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), nil, &out); err != nil {
+// ListDataFlowVariables returns all variables for a data flow.
+func (c *Client) ListDataFlowVariables(ctx context.Context, environmentID, dataFlowID string) ([]DataFlowVariable, error) {
+	var out dataFlowVariablesPage
+	if err := c.request(ctx, http.MethodGet, c.envPath(environmentID, "/rivers/"+dataFlowID+"/variables"), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
 }
 
-// PutRiverVariables replaces the full variable list for a river. Pass an empty slice
-// to delete all variables.
-func (c *Client) PutRiverVariables(ctx context.Context, environmentID, riverID string, items []RiverVariable) ([]RiverVariable, error) {
+// PutDataFlowVariables replaces the full variable list for a data flow. Pass
+// an empty slice to delete all variables.
+func (c *Client) PutDataFlowVariables(ctx context.Context, environmentID, dataFlowID string, items []DataFlowVariable) ([]DataFlowVariable, error) {
 	body := map[string]any{"items": items}
-	var out riverVariablesPage
-	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+riverID+"/variables"), body, &out); err != nil {
+	var out dataFlowVariablesPage
+	if err := c.request(ctx, http.MethodPut, c.envPath(environmentID, "/rivers/"+dataFlowID+"/variables"), body, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -1032,9 +1032,9 @@ func (c *Client) DiscoverTargetMetadata(ctx context.Context, environmentID strin
 	return res, nil
 }
 
-// EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
-// the river. Must be called after the river is updated to extract_method=log and
-// before the first CDC run. Returns the async operation id (empty = synchronous).
+// EnableCDCDataFlow calls the CDC-enable endpoint which sets ENABLE_LOG=true on
+// the data flow. Must be called after the data flow is updated to extract_method=log
+// and before the first CDC run. Returns the async operation id (empty = synchronous).
 func (c *Client) EnableCDCDataFlow(ctx context.Context, environmentID, id string) (string, error) {
 	var out map[string]any
 	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/enable_cdc"), nil, &out); err != nil {
@@ -1084,10 +1084,10 @@ func (c *Client) ListSourceTypes(ctx context.Context) ([]map[string]any, error) 
 	return c.listTypeCatalog(ctx, "data_source_types", false)
 }
 
-// ---- River groups ----------------------------------------------------------
+// ---- Data flow groups -------------------------------------------------------
 
-// RiverGroup is the normalised view of a river group returned by the v1 API.
-type RiverGroup struct {
+// DataFlowGroup is the normalised view of a data flow group returned by the v1 API.
+type DataFlowGroup struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Color     string `json:"color"`
@@ -1095,11 +1095,11 @@ type RiverGroup struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// ListRiverGroups returns every river group in the environment. The v1 API
-// exposes GET only for groups; creation/mutation is UI-only (allow_from_api=false
-// on the internal route). This method pages until exhausted.
-func (c *Client) ListRiverGroups(ctx context.Context, environmentID string) ([]RiverGroup, error) {
-	var all []RiverGroup
+// ListDataFlowGroups returns every data flow group in the environment. The v1
+// API exposes GET only for groups; creation/mutation is UI-only
+// (allow_from_api=false on the internal route). This method pages until exhausted.
+func (c *Client) ListDataFlowGroups(ctx context.Context, environmentID string) ([]DataFlowGroup, error) {
+	var all []DataFlowGroup
 	for page := 1; ; page++ {
 		var resp struct {
 			Items      []map[string]any `json:"items"`
@@ -1118,7 +1118,7 @@ func (c *Client) ListRiverGroups(ctx context.Context, environmentID string) ([]R
 			if id == "" {
 				id = str(it["id"])
 			}
-			all = append(all, RiverGroup{
+			all = append(all, DataFlowGroup{
 				ID:        id,
 				Name:      str(it["name"]),
 				Color:     str(it["color"]),

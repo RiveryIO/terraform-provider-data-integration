@@ -7,7 +7,7 @@ environment_id = "<existing_environment_id>"
 group_id       = "<env_group_cross_id>"
 # api_token    = "<token>"   # better: export DATA_INTEGRATION_API_TOKEN
 
-river_name         = "TF_s2t_bigquery"
+data_flow_name     = "TF_s2t_bigquery"
 bq_connection_name = "tf-bigquery-target"
 
 # BigQuery target (identifiers, not secrets — but keep real values out of git)
