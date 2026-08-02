@@ -8,9 +8,19 @@
 # Why call release.yml directly instead of just pushing a tag?
 #   A tag pushed with the default GITHUB_TOKEN does NOT trigger other workflows
 #   (GitHub prevents recursive Actions runs). So a plain "create tag" step would
-#   never fire release.yml's `push: tags` trigger. Rather than introduce a PAT
-#   secret, we create the tag and then call the release workflow in the same run
-#   (`uses: ./.github/workflows/release.yml`). Self-contained, no extra secret.
+#   never fire release.yml's `push: tags` trigger. We create the tag and then
+#   call the release workflow in the same run (`uses: ./.github/workflows/release.yml`)
+#   to sidestep that, regardless of which credential pushed the tag.
+#
+# Why the checkout uses RELEASE_TAG_PAT instead of the default GITHUB_TOKEN:
+#   This repo's "protect-release-tags" ruleset blocks tag creation on refs/tags/v*
+#   for everyone except Organization Admins and repo Admins — the default
+#   GITHUB_TOKEN identity isn't in either bypass category, so `git push` on the
+#   new tag was silently failing (GH013 rule violation) on every merge. Checking
+#   out with a PAT belonging to an account that already has the repo Admin role
+#   (or is an org admin) lets the tag push bypass the ruleset like a human push
+#   would. Requires a `RELEASE_TAG_PAT` repo secret: a token (classic `repo` scope,
+#   or fine-grained with Contents: Read and write on this repo) from such an account.
 #
 # Bump rules (commits in <last v* tag>..HEAD):
 #   - a `!` after the type (e.g. `feat!:`) or `BREAKING CHANGE` in a body -> MAJOR
@@ -51,6 +61,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # See header comment: needed so the tag push bypasses the
+          # protect-release-tags ruleset. Falls back to GITHUB_TOKEN (which will
+          # keep failing the tag push) if the secret isn't configured, rather
+          # than breaking checkout entirely.
+          token: ${{ secrets.RELEASE_TAG_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Compute next version from conventional commits
         id: bump
