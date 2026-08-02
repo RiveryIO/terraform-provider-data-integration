@@ -23,7 +23,7 @@ var (
 )
 
 // activationTimeout bounds how long Create waits for an asynchronous
-// activate_river operation to finish before triggering the run.
+// activation operation to finish before triggering the run.
 const activationTimeout = 2 * time.Minute
 
 // NewDataFlowRunResource is the factory registered with the provider.
@@ -50,7 +50,7 @@ func (r *dataFlowRunResource) Metadata(_ context.Context, req resource.MetadataR
 func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Triggers a run of a data flow on apply — the Terraform-native way to " +
-			"execute the underlying API's activate_river + run actions. This is an imperative action " +
+			"execute the underlying API's activate + run actions. This is an imperative action " +
 			"modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it " +
 			"fires one run; change `triggers` (or replace the resource) to fire another. It does not " +
 			"track run status or reconcile anything on refresh, and destroying it does not cancel or " +
@@ -195,12 +195,12 @@ func (r *dataFlowRunResource) waitForOperation(ctx context.Context, envID, opID 
 			return true
 		case "E":
 			diags.AddError("Data flow activation failed",
-				fmt.Sprintf("activate_river operation %s reported an error: %s", opID, errMsg))
+				fmt.Sprintf("activate operation %s reported an error: %s", opID, errMsg))
 			return false
 		}
 		if time.Now().After(deadline) {
 			diags.AddError("Data flow activation timed out",
-				fmt.Sprintf("activate_river operation %s did not finish within %s (last status %q).",
+				fmt.Sprintf("activate operation %s did not finish within %s (last status %q).",
 					opID, activationTimeout, status))
 			return false
 		}

@@ -1032,7 +1032,7 @@ func (c *Client) DiscoverTargetMetadata(ctx context.Context, environmentID strin
 	return res, nil
 }
 
-// EnableCDCDataFlow calls the enable_cdc endpoint which sets ENABLE_LOG=true on
+// EnableCDCDataFlow calls the CDC-enable endpoint which sets ENABLE_LOG=true on
 // the data flow. Must be called after the data flow is updated to extract_method=log
 // and before the first CDC run. Returns the async operation id (empty = synchronous).
 func (c *Client) EnableCDCDataFlow(ctx context.Context, environmentID, id string) (string, error) {

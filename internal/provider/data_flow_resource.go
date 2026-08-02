@@ -145,7 +145,7 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "Whether to activate (enable) the data flow after create or update. " +
 					"When true the provider runs: disable (if already active) → update → activate. " +
 					"The disable+update step initialises the fire-service task entry that the " +
-					"activate_river API requires — data flows created via the API lack this entry until " +
+					"activate API requires — data flows created via the API lack this entry until " +
 					"their first PUT, so setting activate = true here is the correct way to enable a " +
 					"freshly-created data flow.",
 			},
@@ -198,7 +198,7 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 
 	if plan.Activate.ValueBool() {
 		// A PUT after POST initialises the fire-service task entry that
-		// activate_river requires. Without this step, activation always fails
+		// the activate operation requires. Without this step, activation always fails
 		// with RVR-ACTIVATE-500 for API-created data flows.
 		if _, err2 := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error initialising data flow before activation", err2)
@@ -291,7 +291,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// After switching to CDC, enable_cdc must be called before the data flow can run.
+	// After switching to CDC, CDC must be enabled before the data flow can run.
 	// This is a one-time operation that sets ENABLE_LOG=true on the data flow.
 	if switchingToCDC {
 		resp.Diagnostics.Append(r.enableCDC(ctx, envID, plan.ID.ValueString())...)
@@ -301,7 +301,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if plan.Activate.ValueBool() {
-		// CDC data flows take longer to activate after enable_cdc — use the extended timeout.
+		// CDC data flows take longer to activate after enabling CDC — use the extended timeout.
 		activateTimeout := dataFlowOpTimeout
 		if switchingToCDC {
 			activateTimeout = cdcEnableOpTimeout
@@ -364,7 +364,7 @@ const dataFlowOpTimeout = 5 * time.Minute
 const cdcEnableOpTimeout = 10 * time.Minute
 
 // activateFlow calls activate and polls the async operation.
-// Pass timeout=cdcEnableOpTimeout when activating immediately after enable_cdc,
+// Pass timeout=cdcEnableOpTimeout when activating immediately after enabling CDC,
 // since CDC data flows take longer to reach ACTIVE state.
 func (r *dataFlowResource) activateFlow(ctx context.Context, envID, id string, timeout time.Duration) diag.Diagnostics {
 	var diags diag.Diagnostics
@@ -379,7 +379,7 @@ func (r *dataFlowResource) activateFlow(ctx context.Context, envID, id string, t
 	return diags
 }
 
-// enableCDC calls the enable_cdc endpoint and polls the async operation.
+// enableCDC calls the CDC-enable endpoint and polls the async operation.
 // Required after switching a data flow to extract_method=log before it can run.
 // Uses a longer timeout since the operation sets up CDC binlog readers and
 // can take several minutes.

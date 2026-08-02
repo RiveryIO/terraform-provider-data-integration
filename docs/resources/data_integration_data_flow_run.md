@@ -3,12 +3,12 @@
 page_title: "boomi_data_integration_data_flow_run Resource - boomi"
 subcategory: ""
 description: |-
-  Triggers a run of a data flow on apply — the Terraform-native way to execute the underlying API's activate_river + run actions. This is an imperative action modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it fires one run; change triggers (or replace the resource) to fire another. It does not track run status or reconcile anything on refresh, and destroying it does not cancel or undo a run.
+  Triggers a run of a data flow on apply — the Terraform-native way to execute the underlying API's activate + run actions. This is an imperative action modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it fires one run; change triggers (or replace the resource) to fire another. It does not track run status or reconcile anything on refresh, and destroying it does not cancel or undo a run.
 ---
 
 # boomi_data_integration_data_flow_run (Resource)
 
-Triggers a run of a data flow on apply — the Terraform-native way to execute the underlying API's activate_river + run actions. This is an imperative action modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it fires one run; change `triggers` (or replace the resource) to fire another. It does not track run status or reconcile anything on refresh, and destroying it does not cancel or undo a run.
+Triggers a run of a data flow on apply — the Terraform-native way to execute the underlying API's activate + run actions. This is an imperative action modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it fires one run; change `triggers` (or replace the resource) to fire another. It does not track run status or reconcile anything on refresh, and destroying it does not cancel or undo a run.
 
 
 

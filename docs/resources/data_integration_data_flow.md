@@ -23,7 +23,7 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 
 ### Optional
 
-- `activate` (Boolean) Whether to activate (enable) the data flow after create or update. When true the provider runs: disable (if already active) → update → activate. The disable+update step initialises the fire-service task entry that the activate_river API requires — data flows created via the API lack this entry until their first PUT, so setting activate = true here is the correct way to enable a freshly-created data flow.
+- `activate` (Boolean) Whether to activate (enable) the data flow after create or update. When true the provider runs: disable (if already active) → update → activate. The disable+update step initialises the fire-service task entry that the activate API requires — data flows created via the API lack this entry until their first PUT, so setting activate = true here is the correct way to enable a freshly-created data flow.
 - `description` (String) Description. Stored under the API's metadata.description (a top-level description is rejected).
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.

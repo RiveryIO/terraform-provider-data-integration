@@ -58,5 +58,5 @@ terraform apply \
 ```
 
 Terraform creates the data flow **disabled**; activate + run it through the API
-(`activate_river` + `run`) or the console. The number of pipeline steps is in the
+(`activate` + `run`) or the console. The number of pipeline steps is in the
 `step_count` output (2 without a Python step, 3 with).
