@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -720,4 +722,276 @@ func diffStrings(got, want []string) string {
 	g, _ := json.MarshalIndent(got, "", "  ")
 	w, _ := json.MarshalIndent(want, "", "  ")
 	return "got:  " + string(g) + "\nwant: " + string(w)
+}
+
+// ── typed settings / schedule tests ───────────────────────────────────────────
+// TestDataFlowSchemaTypedBlocks asserts the typed blocks exist alongside — not
+// instead of — the deprecated JSON attributes, and that the JSON ones now carry
+// a deprecation message.
+func TestDataFlowSchemaTypedBlocks(t *testing.T) {
+	resp := &resource.SchemaResponse{}
+	NewDataFlowResource().Schema(context.Background(), resource.SchemaRequest{}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema diagnostics: %v", resp.Diagnostics)
+	}
+
+	settings, ok := resp.Schema.Attributes["settings"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("settings is not a single nested attribute: %T", resp.Schema.Attributes["settings"])
+	}
+	notification, ok := settings.Attributes["notification"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("settings.notification is not a single nested attribute: %T", settings.Attributes["notification"])
+	}
+	// RiverSettings has exactly two fields; NotificationSettings exactly three.
+	if len(settings.Attributes) != 2 {
+		t.Errorf("settings should mirror RiverSettings' 2 fields, got %d", len(settings.Attributes))
+	}
+	for _, want := range []string{"warning", "failure", "run_threshold"} {
+		report, ok := notification.Attributes[want].(schema.SingleNestedAttribute)
+		if !ok {
+			t.Fatalf("notification.%s missing or wrong type", want)
+		}
+		if email, ok := report.Attributes["email"].(schema.StringAttribute); !ok || !email.Required {
+			t.Errorf("notification.%s.email must be a required string (API marks it required)", want)
+		}
+	}
+
+	sched, ok := resp.Schema.Attributes["schedule"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("schedule is not a single nested attribute: %T", resp.Schema.Attributes["schedule"])
+	}
+	if len(sched.Attributes) != 2 {
+		t.Errorf("schedule should mirror RiverSchedule's 2 fields, got %d", len(sched.Attributes))
+	}
+
+	for _, name := range []string{"settings_json", "schedulers_json"} {
+		attr, ok := resp.Schema.Attributes[name].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s must remain a string attribute (non-breaking)", name)
+		}
+		if attr.DeprecationMessage == "" {
+			t.Errorf("%s should carry a DeprecationMessage", name)
+		}
+	}
+}
+
+// baseDataFlowModel is a minimal valid plan: the only field buildBody strictly
+// needs is a parseable properties_json object.
+func baseDataFlowModel() dataFlowModel {
+	return dataFlowModel{
+		Name:           types.StringValue("flow"),
+		Kind:           types.StringValue("main_river"),
+		Type:           types.StringValue("source_to_target"),
+		PropertiesJSON: jsontypes.NewNormalizedValue(`{"properties_type":"source_to_target"}`),
+		SettingsJSON:   jsontypes.NewNormalizedNull(),
+		SchedulersJSON: jsontypes.NewNormalizedNull(),
+	}
+}
+
+// mustJSON renders a value the way the client will put it on the wire, so the
+// assertions below compare the actual API write payload (Go map key order is
+// normalised by encoding/json).
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
+	}
+	return string(raw)
+}
+
+func buildBodyOrFail(t *testing.T, plan dataFlowModel) map[string]any {
+	t.Helper()
+	var diags diag.Diagnostics
+	body, ok := (&dataFlowResource{}).buildBody(plan, nil, &diags)
+	if !ok || diags.HasError() {
+		t.Fatalf("buildBody failed: %v", diags)
+	}
+	return body
+}
+
+// ── typed settings → API write body ───────────────────────────────────────────
+
+func TestBuildBodyTypedSettingsFullRoundTrip(t *testing.T) {
+	plan := baseDataFlowModel()
+	plan.Settings = &dataFlowSettingsModel{
+		RunTimeoutSeconds: types.Int64Value(43200),
+		Notification: &dataFlowNotificationModel{
+			Warning: &dataFlowNotificationReportModel{
+				Email:     types.StringValue("warn@example.com"),
+				IsEnabled: types.BoolValue(false),
+			},
+			Failure: &dataFlowNotificationReportModel{
+				Email:     types.StringValue("ops@example.com"),
+				IsEnabled: types.BoolValue(true),
+			},
+			RunThreshold: &dataFlowNotificationReportModel{
+				Email:                     types.StringValue("ops@example.com"),
+				IsEnabled:                 types.BoolValue(true),
+				ExecutionTimeLimitSeconds: types.Int64Value(3600),
+			},
+		},
+	}
+
+	body := buildBodyOrFail(t, plan)
+	got := mustJSON(t, body["settings"])
+	want := `{"notification":{"failure":{"email":"ops@example.com","is_enabled":true},` +
+		`"run_threshold":{"email":"ops@example.com","execution_time_limit_seconds":3600,"is_enabled":true},` +
+		`"warning":{"email":"warn@example.com","is_enabled":false}},"run_timeout_seconds":43200}`
+	if got != want {
+		t.Fatalf("settings body mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestBuildBodyTypedSettingsOmitsUnsetFields(t *testing.T) {
+	// run_timeout_seconds unset must NOT be sent as an explicit null — the API
+	// treats a missing value as "automatic timeout calculation", and the update
+	// path strips nulls anyway.
+	plan := baseDataFlowModel()
+	plan.Settings = &dataFlowSettingsModel{
+		RunTimeoutSeconds: types.Int64Null(),
+		Notification:      nil,
+	}
+
+	if got := mustJSON(t, buildBodyOrFail(t, plan)["settings"]); got != `{}` {
+		t.Fatalf("expected empty settings object, got %s", got)
+	}
+
+	// A notification block with no report set collapses to no notification key.
+	plan.Settings.Notification = &dataFlowNotificationModel{}
+	if got := mustJSON(t, buildBodyOrFail(t, plan)["settings"]); got != `{}` {
+		t.Fatalf("expected empty settings object for empty notification, got %s", got)
+	}
+}
+
+// ── typed schedule → API write body ───────────────────────────────────────────
+
+func TestBuildBodyTypedScheduleWrapsIntoSchedulersList(t *testing.T) {
+	plan := baseDataFlowModel()
+	plan.Schedule = &dataFlowScheduleModel{
+		CronExpression: types.StringValue("0 * * * *"),
+		IsEnabled:      types.BoolValue(true),
+	}
+
+	body := buildBodyOrFail(t, plan)
+	got := mustJSON(t, body["schedulers"])
+	want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
+	if got != want {
+		t.Fatalf("schedulers body mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// The CDC path in Update() keys off body["schedulers"] being present. The typed
+// block must satisfy that check exactly as schedulers_json does.
+func TestBuildBodyTypedScheduleSatisfiesCDCSchedulerCheck(t *testing.T) {
+	plan := baseDataFlowModel()
+	plan.PropertiesJSON = jsontypes.NewNormalizedValue(
+		`{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log"}}}`)
+	plan.Schedule = &dataFlowScheduleModel{
+		CronExpression: types.StringValue("*/5 * * * *"),
+		IsEnabled:      types.BoolValue(true),
+	}
+
+	if !isCDCFlow(plan.PropertiesJSON.ValueString()) {
+		t.Fatal("expected a CDC flow")
+	}
+	body := buildBodyOrFail(t, plan)
+	schedulers, ok := body["schedulers"].([]any)
+	if !ok || len(schedulers) != 1 {
+		t.Fatalf("expected exactly one scheduler, got %#v", body["schedulers"])
+	}
+	elem, ok := schedulers[0].(map[string]any)
+	if !ok || elem["is_enabled"] != true {
+		t.Fatalf("expected an enabled scheduler, got %#v", schedulers[0])
+	}
+}
+
+func TestBuildBodyNoScheduleOmitsSchedulersKey(t *testing.T) {
+	if _, present := buildBodyOrFail(t, baseDataFlowModel())["schedulers"]; present {
+		t.Fatal("schedulers must be absent when neither schedule nor schedulers_json is set")
+	}
+}
+
+// ── the deprecated JSON attributes must keep working unchanged ────────────────
+
+func TestBuildBodyJSONAttributesStillWork(t *testing.T) {
+	plan := baseDataFlowModel()
+	plan.SettingsJSON = jsontypes.NewNormalizedValue(`{"run_timeout_seconds":180}`)
+	plan.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"cron_expression":"0 0 * * *","is_enabled":true}]`)
+
+	body := buildBodyOrFail(t, plan)
+	if got := mustJSON(t, body["settings"]); got != `{"run_timeout_seconds":180}` {
+		t.Fatalf("settings_json body mismatch: %s", got)
+	}
+	if got := mustJSON(t, body["schedulers"]); got != `[{"cron_expression":"0 0 * * *","is_enabled":true}]` {
+		t.Fatalf("schedulers_json body mismatch: %s", got)
+	}
+}
+
+// When the typed block is set, the Computed "{}" default that settings_json
+// carries must not clobber it.
+func TestBuildBodyTypedSettingsWinsOverComputedDefault(t *testing.T) {
+	plan := baseDataFlowModel()
+	plan.SettingsJSON = jsontypes.NewNormalizedValue(`{}`) // the schema default
+	plan.Settings = &dataFlowSettingsModel{RunTimeoutSeconds: types.Int64Value(900)}
+
+	if got := mustJSON(t, buildBodyOrFail(t, plan)["settings"]); got != `{"run_timeout_seconds":900}` {
+		t.Fatalf("typed settings did not win over the settings_json default: %s", got)
+	}
+}
+
+// ── mutual exclusion ──────────────────────────────────────────────────────────
+
+func TestValidateDataFlowExclusivitySettingsConflict(t *testing.T) {
+	cfg := baseDataFlowModel()
+	cfg.Settings = &dataFlowSettingsModel{RunTimeoutSeconds: types.Int64Value(60)}
+	cfg.SettingsJSON = jsontypes.NewNormalizedValue(`{"run_timeout_seconds":60}`)
+
+	diags := validateDataFlowExclusivity(cfg)
+	if !diags.HasError() {
+		t.Fatal("expected an error when both settings and settings_json are set")
+	}
+	if s := diags.Errors()[0].Summary(); s != "Conflicting configuration: settings and settings_json" {
+		t.Fatalf("unexpected diagnostic summary: %q", s)
+	}
+}
+
+func TestValidateDataFlowExclusivityScheduleConflict(t *testing.T) {
+	cfg := baseDataFlowModel()
+	cfg.Schedule = &dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}
+	cfg.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`)
+
+	diags := validateDataFlowExclusivity(cfg)
+	if !diags.HasError() {
+		t.Fatal("expected an error when both schedule and schedulers_json are set")
+	}
+	if s := diags.Errors()[0].Summary(); s != "Conflicting configuration: schedule and schedulers_json" {
+		t.Fatalf("unexpected diagnostic summary: %q", s)
+	}
+}
+
+func TestValidateDataFlowExclusivityAllowsEitherAlone(t *testing.T) {
+	cases := map[string]dataFlowModel{
+		"neither": baseDataFlowModel(),
+		"typed only": func() dataFlowModel {
+			m := baseDataFlowModel()
+			m.Settings = &dataFlowSettingsModel{RunTimeoutSeconds: types.Int64Value(60)}
+			m.Schedule = &dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}
+			return m
+		}(),
+		"json only": func() dataFlowModel {
+			m := baseDataFlowModel()
+			m.SettingsJSON = jsontypes.NewNormalizedValue(`{}`)
+			m.SchedulersJSON = jsontypes.NewNormalizedValue(`[]`)
+			return m
+		}(),
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			if diags := validateDataFlowExclusivity(cfg); diags.HasError() {
+				t.Fatalf("unexpected error: %v", diags)
+			}
+		})
+	}
 }

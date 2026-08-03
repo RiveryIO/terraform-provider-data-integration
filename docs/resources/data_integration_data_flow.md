@@ -28,11 +28,77 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.
 - `kind` (String) Data flow kind. Defaults to "main_river".
-- `schedulers_json` (String) The data flow schedule as a JSON array, sent top-level as "schedulers". Each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC data flow without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for non-CDC flows. Config-authoritative like properties_json/settings_json: the provider keeps your configured value and does not refresh it from the API.
-- `settings_json` (String) The data flow settings object as JSON. Defaults to an empty object. Config-authoritative like properties_json (the API adds a notification block on write); the provider does not refresh it from the API.
+- `schedule` (Attributes) Typed data flow schedule — the structured replacement for the deprecated schedulers_json. SINGULAR: the API field is a top-level "schedulers" list but exactly one scheduler is allowed, so this provider models one block and wraps it into the single-element list the API expects. MUTUALLY EXCLUSIVE with schedulers_json — setting both is a configuration error. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC data flow without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Optional for non-CDC flows. Config-authoritative like properties_json/settings: the provider keeps your configured value and does not refresh it from the API. (see [below for nested schema](#nestedatt--schedule))
+- `schedulers_json` (String, Deprecated) The data flow schedule as a JSON array, sent top-level as "schedulers". Each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC data flow without an enabled scheduler ("Please schedule a CDC data flow before enabling or creating"), and the cron must run between once per day and 12 times per hour (i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for non-CDC flows. Config-authoritative like properties_json/settings_json: the provider keeps your configured value and does not refresh it from the API. DEPRECATED in favour of the typed `schedule` block; the two are mutually exclusive.
+- `settings` (Attributes) Typed data flow settings — the structured replacement for the deprecated settings_json. Mirrors the API's RiverSettings schema exactly: run_timeout_seconds plus a notification block, and nothing else. MUTUALLY EXCLUSIVE with settings_json — setting both is a configuration error. Config-authoritative like properties_json: the API normalises settings on write (it adds/completes the notification block), so the provider keeps your configured value and does not refresh this block from the API. Drift inside it is therefore not detected. Fields you omit are omitted from the write body; because the update path is a read-modify-write, an omitted field keeps whatever the data flow already has on the server rather than being reset. (see [below for nested schema](#nestedatt--settings))
+- `settings_json` (String, Deprecated) The data flow settings object as JSON. Defaults to an empty object. Config-authoritative like properties_json (the API adds a notification block on write); the provider does not refresh it from the API. DEPRECATED in favour of the typed `settings` block; the two are mutually exclusive.
 
 ### Read-Only
 
 - `id` (String) Data flow ID (cross_id), assigned by the API.
 - `status` (String) Server-side activation status, from the API's metadata.river_status: "active" or "disabled". Read from the plain data flow GET — this provider is a desired-state tool and never consults the operations/activities layer. Null when the API response omits the field (observed on a small fraction of data flows). Read-only: change activation through activate.
 - `step_ids` (List of String) Stable step IDs for logic data flow steps, auto-generated on first create and preserved across updates. The provider injects these into the logic_steps array before each API write so step_id does not need to appear in properties_json. Positional: index 0 corresponds to the first step, index 1 to the second, etc. Non-logic data flows always have an empty list.
+
+<a id="nestedatt--schedule"></a>
+### Nested Schema for `schedule`
+
+Optional:
+
+- `cron_expression` (String) 5-field UNIX cron expression (e.g. "0 * * * *" for hourly). The schedule must fire between once per day and 12 times per hour — a 5-minute-to-24-hour interval. Anything outside that band is rejected for CDC (log-based) data flows.
+- `is_enabled` (Boolean) Whether the schedule is active. Omitted means false, matching the API's default. Must be true for CDC (log-based) data flows — the API refuses to create or enable a CDC data flow whose scheduler is disabled.
+
+
+<a id="nestedatt--settings"></a>
+### Nested Schema for `settings`
+
+Optional:
+
+- `notification` (Attributes) Notification settings for the whole data flow — what to report on warning, on failure/timeout, and when a run exceeds a duration threshold. The API models exactly these three reports (NotificationSettings); each is the same {email, is_enabled, execution_time_limit_seconds} shape (RiverNotificationReport). (see [below for nested schema](#nestedatt--settings--notification))
+- `run_timeout_seconds` (Number) Timeout of the data flow, in seconds (e.g. 43200 for 12 hours). Omit to leave the platform's automatic timeout-calculation mode in effect — the API models that mode as a null run_timeout_seconds.
+
+<a id="nestedatt--settings--notification"></a>
+### Nested Schema for `settings.notification`
+
+Optional:
+
+- `failure` (Attributes) Report sent when the data flow fails or times out. (see [below for nested schema](#nestedatt--settings--notification--failure))
+- `run_threshold` (Attributes) Report sent when a run exceeds execution_time_limit_seconds. This is the only report for which execution_time_limit_seconds is meaningful. (see [below for nested schema](#nestedatt--settings--notification--run_threshold))
+- `warning` (Attributes) Report sent when the data flow completes with warnings. (see [below for nested schema](#nestedatt--settings--notification--warning))
+
+<a id="nestedatt--settings--notification--failure"></a>
+### Nested Schema for `settings.notification.failure`
+
+Required:
+
+- `email` (String) Email address the report is sent to. The API marks this the only required field of a notification report.
+
+Optional:
+
+- `execution_time_limit_seconds` (Number) Run duration in seconds after which the report fires (e.g. 43200). Per the API, only relevant for run_threshold.
+- `is_enabled` (Boolean) Whether this report is enabled. Omitted means false, matching the API's default.
+
+
+<a id="nestedatt--settings--notification--run_threshold"></a>
+### Nested Schema for `settings.notification.run_threshold`
+
+Required:
+
+- `email` (String) Email address the report is sent to. The API marks this the only required field of a notification report.
+
+Optional:
+
+- `execution_time_limit_seconds` (Number) Run duration in seconds after which the report fires (e.g. 43200). Per the API, only relevant for run_threshold.
+- `is_enabled` (Boolean) Whether this report is enabled. Omitted means false, matching the API's default.
+
+
+<a id="nestedatt--settings--notification--warning"></a>
+### Nested Schema for `settings.notification.warning`
+
+Required:
+
+- `email` (String) Email address the report is sent to. The API marks this the only required field of a notification report.
+
+Optional:
+
+- `execution_time_limit_seconds` (Number) Run duration in seconds after which the report fires (e.g. 43200). Per the API, only relevant for run_threshold.
+- `is_enabled` (Boolean) Whether this report is enabled. Omitted means false, matching the API's default.
