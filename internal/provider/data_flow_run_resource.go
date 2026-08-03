@@ -49,12 +49,33 @@ func (r *dataFlowRunResource) Metadata(_ context.Context, req resource.MetadataR
 
 func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Triggers a run of a data flow on apply — the Terraform-native way to " +
+		DeprecationMessage: "boomi_data_integration_data_flow_run is deprecated and will be removed in a " +
+			"future major version: Terraform manages desired state, it does not run flows. Trigger runs " +
+			"from the data flow's own schedule (schedulers_json on boomi_data_integration_data_flow, or " +
+			"the platform scheduler) or with a direct API call from your orchestrator or CI pipeline.",
+		Description: "**Deprecated — will be removed in a future major version.** " +
+			"Triggers a run of a data flow on apply — the Terraform-native way to " +
 			"execute the underlying API's activate + run actions. This is an imperative action " +
 			"modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it " +
 			"fires one run; change `triggers` (or replace the resource) to fire another. It does not " +
 			"track run status or reconcile anything on refresh, and destroying it does not cancel or " +
-			"undo a run.",
+			"undo a run.\n\n" +
+			"That is precisely why it is deprecated. This provider is a desired-state tool: it " +
+			"describes the data flows, connections and variables that should exist, and reconciles " +
+			"them on every plan. Running a flow is an operation, not desired state — there is nothing " +
+			"for `Read` to observe, nothing for `Delete` to undo, and every attribute is " +
+			"`RequiresReplace` alongside a `triggers` map, i.e. the `null_resource` escape hatch " +
+			"rather than real Terraform state. Keeping it invites plans that appear to converge while " +
+			"silently firing side effects.\n\n" +
+			"Instead, run data flows the way the platform intends: define the schedule on the flow " +
+			"itself via `schedulers_json` on `boomi_data_integration_data_flow` (or the platform " +
+			"scheduler UI) so the platform owns the timing, or call the run API directly from " +
+			"whatever orchestrator or CI pipeline needs the run at a specific point in its own " +
+			"workflow. Activation — the one operation that is genuinely part of a data flow's " +
+			"desired state — remains available as `activate` on " +
+			"`boomi_data_integration_data_flow`.\n\n" +
+			"Existing configurations keep working unchanged; the resource is retained so state " +
+			"containing it can still be planned and destroyed cleanly.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
