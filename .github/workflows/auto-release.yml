@@ -1,28 +1,30 @@
 # =============================================================================
-# DISABLED (2026-08-03) - do not rely on this workflow to cut releases.
+# OPERATING REQUIREMENT: this workflow needs the `RELEASE_TAG_PAT` repo secret.
 #
-# Disabled at the API level via `gh workflow disable "Auto Release"`, so it no
-# longer runs on push to `main`. The YAML below is left intact and unmodified:
-# the logic is correct, it is the repository configuration that blocks it.
-#
-# Root cause: a GitHub repository ruleset restricts tag creation, and
-# `github-actions[bot]` is not exempt from it. The "Create and push tag" step
-# computed the right version (v1.1.0) and then failed to push:
+# The `protect-release-tags` ruleset restricts creation/deletion/non-fast-forward
+# on `refs/tags/v*`. Its only bypass actors are Organization Admins and the repo
+# `Admin` role; `github-actions[bot]` is in neither, so a tag push made with the
+# default GITHUB_TOKEN is rejected:
 #
 #   remote: error: GH013: Repository rule violations found for refs/tags/v1.1.0.
 #   remote: - Cannot create ref due to creations being restricted.
-#    ! [remote rejected] v1.1.0 -> v1.1.0 (push declined due to repository rule violations)
 #
-# `compute-tag` failed on every run since 2026-07-27 (4/4, all on `main`). This
-# is also why v0.7.0 and v1.0.0 had to be tagged by hand.
+# That is why every run between 2026-07-27 and 2026-08-03 failed at "Create and
+# push tag" (the version was computed correctly each time), and why v0.7.0 and
+# v1.0.0 had to be tagged by hand.
 #
-# To re-enable (`gh workflow enable "Auto Release"`), one of these must happen
-# first, or it will simply fail the same way again:
-#   1. Exempt `github-actions[bot]` from the tag-creation restriction in the
-#      ruleset (Settings > Rules > Rulesets - add it to the bypass list), or
-#   2. Push the tag with a PAT that holds a ruleset bypass, instead of the
-#      default GITHUB_TOKEN.
-# Releases are cut manually in the meantime: push a `v*` tag, which triggers
+# Two ways to make auto-release work. Only (1) is implemented here:
+#   1. IMPLEMENTED - check out with a PAT from an account that already holds
+#      org-admin or repo-Admin, so the tag push bypasses the ruleset the same way
+#      a human push does. Requires the `RELEASE_TAG_PAT` secret; the
+#      "Verify release credential" step below fails fast with instructions if it
+#      is absent, instead of letting the run die on an opaque GH013 later.
+#   2. NOT IMPLEMENTED - add `github-actions[bot]` to the ruleset's bypass actors
+#      (Settings > Rules > Rulesets > protect-release-tags). This needs no secret,
+#      but it weakens tag protection for every workflow in the repo and is a
+#      governance decision for a repo/org admin to make deliberately.
+#
+# Until the secret exists, cut releases manually: push a `v*` tag, which triggers
 # release.yml (`push: tags`) and GoReleaser.
 # =============================================================================
 
@@ -61,23 +63,14 @@
 #   - No commits since the last tag  -> log + exit 0, no release.
 #   - Latest commit contains `[skip release]` -> log + exit 0, no release.
 
-name: Auto Release (DISABLED)
+name: Auto Release
 
-# DISABLED IN CODE, not only via the Actions API.
-#
-# The original trigger was:
-#
-#   on:
-#     push:
-#       branches: [main]
-#
-# It is deliberately replaced with `workflow_dispatch` so this workflow cannot
-# fire on a merge to `main` even if someone runs `gh workflow enable`. Re-enabling
-# it properly means restoring the `push` trigger above AND fixing the ruleset (see
-# the header comment) — not just flipping the API flag. Left dispatch-only rather
-# than deleted so the tag/bump logic stays reviewable and testable by hand.
+# Fires on every merge to `main`. No `workflow_dispatch`: a manual run would
+# attempt a real tag push and GitHub Release, so releases are either automatic
+# on merge or cut by hand with an explicit `v*` tag push.
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
 
 # Serialize releases: if two merges land close together, run them one at a time
 # so we never compute/push two tags concurrently or double-release.
@@ -97,14 +90,28 @@ jobs:
       release: ${{ steps.bump.outputs.release }}
       new_tag: ${{ steps.bump.outputs.new_tag }}
     steps:
+      # Fail fast and legibly if the release credential is missing, rather than
+      # running the whole bump, then dying on an opaque `GH013 ... creations
+      # being restricted` at the tag push. See the header comment.
+      - name: Verify release credential is configured
+        env:
+          RELEASE_TAG_PAT: ${{ secrets.RELEASE_TAG_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_TAG_PAT:-}" ]; then
+            echo "::error title=Missing RELEASE_TAG_PAT secret::Auto Release cannot push a v* tag: the repository secret RELEASE_TAG_PAT does not exist. ACTION REQUIRED BY A HUMAN with GitHub org-admin or repo-Admin rights on RiveryIO/terraform-provider-data-integration: create a PAT owned by an account holding one of those roles (classic token with 'repo' scope, or fine-grained with Contents: Read and write on this repo) and add it under Settings > Secrets and variables > Actions as RELEASE_TAG_PAT. Reason: the 'protect-release-tags' ruleset blocks tag creation on refs/tags/v* for everyone except Organization Admins and the repo Admin role, and github-actions[bot] is in neither, so a push with the default GITHUB_TOKEN is rejected with GH013. Alternative, a governance decision that must NOT be taken unilaterally: add github-actions[bot] to that ruleset's bypass actors, which needs no secret but weakens tag protection for every workflow in this repo. Until one of those is done, cut releases by pushing a v* tag manually."
+            exit 1
+          fi
+          echo "RELEASE_TAG_PAT is configured; proceeding."
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # See header comment: needed so the tag push bypasses the
-          # protect-release-tags ruleset. Falls back to GITHUB_TOKEN (which will
-          # keep failing the tag push) if the secret isn't configured, rather
-          # than breaking checkout entirely.
+          # See header comment: the PAT is what lets the tag push bypass the
+          # protect-release-tags ruleset. The GITHUB_TOKEN fallback only keeps
+          # checkout itself working; it cannot push a v* tag, and the guard step
+          # above has already failed the job by the time it would be used.
           token: ${{ secrets.RELEASE_TAG_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Compute next version from conventional commits
