@@ -22,9 +22,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = (*dataFlowResource)(nil)
-	_ resource.ResourceWithConfigure   = (*dataFlowResource)(nil)
-	_ resource.ResourceWithImportState = (*dataFlowResource)(nil)
+	_ resource.Resource                   = (*dataFlowResource)(nil)
+	_ resource.ResourceWithConfigure      = (*dataFlowResource)(nil)
+	_ resource.ResourceWithImportState    = (*dataFlowResource)(nil)
+	_ resource.ResourceWithValidateConfig = (*dataFlowResource)(nil)
 )
 
 // NewDataFlowResource is the factory registered with the provider.
@@ -35,19 +36,51 @@ type dataFlowResource struct {
 }
 
 type dataFlowModel struct {
-	ID             types.String         `tfsdk:"id"`
-	EnvironmentID  types.String         `tfsdk:"environment_id"`
-	Name           types.String         `tfsdk:"name"`
-	Kind           types.String         `tfsdk:"kind"`
-	Type           types.String         `tfsdk:"type"`
-	Description    types.String         `tfsdk:"description"`
-	PropertiesJSON jsontypes.Normalized `tfsdk:"properties_json"`
-	SettingsJSON   jsontypes.Normalized `tfsdk:"settings_json"`
-	SchedulersJSON jsontypes.Normalized `tfsdk:"schedulers_json"`
-	GroupID        types.String         `tfsdk:"group_id"`
-	Activate       types.Bool           `tfsdk:"activate"`
-	Status         types.String         `tfsdk:"status"`
-	StepIDs        types.List           `tfsdk:"step_ids"`
+	ID             types.String           `tfsdk:"id"`
+	EnvironmentID  types.String           `tfsdk:"environment_id"`
+	Name           types.String           `tfsdk:"name"`
+	Kind           types.String           `tfsdk:"kind"`
+	Type           types.String           `tfsdk:"type"`
+	Description    types.String           `tfsdk:"description"`
+	PropertiesJSON jsontypes.Normalized   `tfsdk:"properties_json"`
+	Settings       *dataFlowSettingsModel `tfsdk:"settings"`
+	SettingsJSON   jsontypes.Normalized   `tfsdk:"settings_json"`
+	Schedule       *dataFlowScheduleModel `tfsdk:"schedule"`
+	SchedulersJSON jsontypes.Normalized   `tfsdk:"schedulers_json"`
+	GroupID        types.String           `tfsdk:"group_id"`
+	Activate       types.Bool             `tfsdk:"activate"`
+	Status         types.String           `tfsdk:"status"`
+	StepIDs        types.List             `tfsdk:"step_ids"`
+}
+
+// dataFlowSettingsModel mirrors the API's RiverSettings schema, which has
+// exactly two fields: run_timeout_seconds and notification.
+type dataFlowSettingsModel struct {
+	RunTimeoutSeconds types.Int64                `tfsdk:"run_timeout_seconds"`
+	Notification      *dataFlowNotificationModel `tfsdk:"notification"`
+}
+
+// dataFlowNotificationModel mirrors NotificationSettings: three optional
+// reports, each a RiverNotificationReport.
+type dataFlowNotificationModel struct {
+	Warning      *dataFlowNotificationReportModel `tfsdk:"warning"`
+	Failure      *dataFlowNotificationReportModel `tfsdk:"failure"`
+	RunThreshold *dataFlowNotificationReportModel `tfsdk:"run_threshold"`
+}
+
+// dataFlowNotificationReportModel mirrors RiverNotificationReport. email is the
+// only field the API marks required.
+type dataFlowNotificationReportModel struct {
+	Email                     types.String `tfsdk:"email"`
+	IsEnabled                 types.Bool   `tfsdk:"is_enabled"`
+	ExecutionTimeLimitSeconds types.Int64  `tfsdk:"execution_time_limit_seconds"`
+}
+
+// dataFlowScheduleModel mirrors RiverSchedule — one element of the API's
+// top-level "schedulers" list. Singular because the API permits at most one.
+type dataFlowScheduleModel struct {
+	CronExpression types.String `tfsdk:"cron_expression"`
+	IsEnabled      types.Bool   `tfsdk:"is_enabled"`
 }
 
 func (r *dataFlowResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -128,18 +161,103 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"you (its extract_method/incremental_field/date_range inputs) — decode its schemas_json " +
 					"output straight into this field.",
 			},
+			"settings": schema.SingleNestedAttribute{
+				Optional: true,
+				Description: "Typed data flow settings — the structured replacement for the deprecated " +
+					"settings_json. Mirrors the API's RiverSettings schema exactly: run_timeout_seconds " +
+					"plus a notification block, and nothing else. " +
+					"MUTUALLY EXCLUSIVE with settings_json — setting both is a configuration error. " +
+					"Config-authoritative like properties_json: the API normalises settings on write " +
+					"(it adds/completes the notification block), so the provider keeps your configured " +
+					"value and does not refresh this block from the API. Drift inside it is therefore " +
+					"not detected. Fields you omit are omitted from the write body; because the update " +
+					"path is a read-modify-write, an omitted field keeps whatever the data flow already " +
+					"has on the server rather than being reset.",
+				Attributes: map[string]schema.Attribute{
+					"run_timeout_seconds": schema.Int64Attribute{
+						Optional: true,
+						Description: "Timeout of the data flow, in seconds (e.g. 43200 for 12 hours). " +
+							"Omit to leave the platform's automatic timeout-calculation mode in " +
+							"effect — the API models that mode as a null run_timeout_seconds.",
+					},
+					"notification": schema.SingleNestedAttribute{
+						Optional: true,
+						Description: "Notification settings for the whole data flow — what to report on " +
+							"warning, on failure/timeout, and when a run exceeds a duration threshold. " +
+							"The API models exactly these three reports (NotificationSettings); each is " +
+							"the same {email, is_enabled, execution_time_limit_seconds} shape " +
+							"(RiverNotificationReport).",
+						Attributes: map[string]schema.Attribute{
+							"warning": schema.SingleNestedAttribute{
+								Optional:    true,
+								Description: "Report sent when the data flow completes with warnings.",
+								Attributes:  dataFlowNotificationReportAttributes(),
+							},
+							"failure": schema.SingleNestedAttribute{
+								Optional:    true,
+								Description: "Report sent when the data flow fails or times out.",
+								Attributes:  dataFlowNotificationReportAttributes(),
+							},
+							"run_threshold": schema.SingleNestedAttribute{
+								Optional: true,
+								Description: "Report sent when a run exceeds execution_time_limit_seconds. " +
+									"This is the only report for which execution_time_limit_seconds is " +
+									"meaningful.",
+								Attributes: dataFlowNotificationReportAttributes(),
+							},
+						},
+					},
+				},
+			},
 			"settings_json": schema.StringAttribute{
 				Optional:   true,
 				Computed:   true,
 				CustomType: jsontypes.NormalizedType{},
 				Default:    stringdefault.StaticString("{}"),
+				DeprecationMessage: "Use the typed `settings` block instead — it mirrors the API's " +
+					"RiverSettings schema (run_timeout_seconds + notification). settings_json keeps " +
+					"working for now and is planned for removal in a future major version.",
 				Description: "The data flow settings object as JSON. Defaults to an empty object. " +
 					"Config-authoritative like properties_json (the API adds a notification block " +
-					"on write); the provider does not refresh it from the API.",
+					"on write); the provider does not refresh it from the API. " +
+					"DEPRECATED in favour of the typed `settings` block; the two are mutually exclusive.",
+			},
+			"schedule": schema.SingleNestedAttribute{
+				Optional: true,
+				Description: "Typed data flow schedule — the structured replacement for the deprecated " +
+					"schedulers_json. SINGULAR: the API field is a top-level \"schedulers\" list but " +
+					"exactly one scheduler is allowed, so this provider models one block and wraps it " +
+					"into the single-element list the API expects. " +
+					"MUTUALLY EXCLUSIVE with schedulers_json — setting both is a configuration error. " +
+					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
+					"data flow without an enabled scheduler (\"Please schedule a CDC data flow before " +
+					"enabling or creating\"), and the cron must run between once per day and 12 times " +
+					"per hour (i.e. a 5-minute-to-24-hour interval). Optional for non-CDC flows. " +
+					"Config-authoritative like properties_json/settings: the provider keeps your " +
+					"configured value and does not refresh it from the API.",
+				Attributes: map[string]schema.Attribute{
+					"cron_expression": schema.StringAttribute{
+						Optional: true,
+						Description: "5-field UNIX cron expression (e.g. \"0 * * * *\" for hourly). " +
+							"The schedule must fire between once per day and 12 times per hour — a " +
+							"5-minute-to-24-hour interval. Anything outside that band is rejected for " +
+							"CDC (log-based) data flows.",
+					},
+					"is_enabled": schema.BoolAttribute{
+						Optional: true,
+						Description: "Whether the schedule is active. Omitted means false, matching the " +
+							"API's default. Must be true for CDC (log-based) data flows — the API " +
+							"refuses to create or enable a CDC data flow whose scheduler is disabled.",
+					},
+				},
 			},
 			"schedulers_json": schema.StringAttribute{
 				Optional:   true,
 				CustomType: jsontypes.NormalizedType{},
+				DeprecationMessage: "Use the typed `schedule` block instead — it mirrors the API's " +
+					"RiverSchedule schema and is singular because the API permits at most one " +
+					"scheduler. schedulers_json keeps working for now and is planned for removal in " +
+					"a future major version.",
 				Description: "The data flow schedule as a JSON array, sent top-level as \"schedulers\". " +
 					"Each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
 					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
@@ -147,7 +265,8 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"or creating\"), and the cron must run between once per day and 12 times per hour " +
 					"(i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for " +
 					"non-CDC flows. Config-authoritative like properties_json/settings_json: the provider " +
-					"keeps your configured value and does not refresh it from the API.",
+					"keeps your configured value and does not refresh it from the API. " +
+					"DEPRECATED in favour of the typed `schedule` block; the two are mutually exclusive.",
 			},
 			"group_id": schema.StringAttribute{
 				Optional: true,
@@ -723,8 +842,16 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 		return nil, false
 	}
 	injectStepIDsIntoProps(props, stepIDs)
+
+	// settings: the typed block wins when present. ValidateConfig already rejects
+	// configs that set both, so this ordering never silently discards user intent —
+	// it only skips the Computed default ("{}") that settings_json carries when the
+	// typed block is the one in use.
 	settings := map[string]any{}
-	if !plan.SettingsJSON.IsNull() && !plan.SettingsJSON.IsUnknown() {
+	switch {
+	case plan.Settings != nil:
+		settings = dataFlowSettingsBody(plan.Settings)
+	case !plan.SettingsJSON.IsNull() && !plan.SettingsJSON.IsUnknown():
 		s, ok := decodeJSONObject(plan.SettingsJSON, path.Root("settings_json"), diags)
 		if !ok {
 			return nil, false
@@ -776,7 +903,14 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	//  4. Verify: after apply, GET the data flow and confirm interface_parameters.source
 	//     round-trips, and that the console Source tab pre-selects the values (not
 	//     "Select..."). A test-connection on the source connection is recommended too.
-	if !plan.SchedulersJSON.IsNull() && !plan.SchedulersJSON.IsUnknown() {
+	//
+	// The typed `schedule` block wins when present; it renders into the same
+	// single-element list schedulers_json produces, so the CDC path behaves
+	// identically either way. ValidateConfig rejects setting both.
+	switch {
+	case plan.Schedule != nil:
+		body["schedulers"] = []any{dataFlowScheduleBody(plan.Schedule)}
+	case !plan.SchedulersJSON.IsNull() && !plan.SchedulersJSON.IsUnknown():
 		schedulers, ok := decodeJSONArray(plan.SchedulersJSON, path.Root("schedulers_json"), diags)
 		if !ok {
 			return nil, false
@@ -784,6 +918,140 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 		body["schedulers"] = schedulers
 	}
 	return body, true
+}
+
+// ── typed settings / schedule ─────────────────────────────────────────────────
+
+// dataFlowNotificationReportAttributes returns the RiverNotificationReport
+// attribute set, shared by the warning / failure / run_threshold reports.
+func dataFlowNotificationReportAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"email": schema.StringAttribute{
+			Required: true,
+			Description: "Email address the report is sent to. The API marks this the only " +
+				"required field of a notification report.",
+		},
+		"is_enabled": schema.BoolAttribute{
+			Optional: true,
+			Description: "Whether this report is enabled. Omitted means false, matching the " +
+				"API's default.",
+		},
+		"execution_time_limit_seconds": schema.Int64Attribute{
+			Optional: true,
+			Description: "Run duration in seconds after which the report fires (e.g. 43200). " +
+				"Per the API, only relevant for run_threshold.",
+		},
+	}
+}
+
+// ValidateConfig rejects configurations that set a typed block and its
+// deprecated JSON counterpart at the same time. Doing this at validate time
+// (rather than picking a winner in buildBody) means the conflict surfaces as a
+// plan-time error with an attribute path, not as a silently ignored setting.
+func (r *dataFlowResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg dataFlowModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(validateDataFlowExclusivity(cfg)...)
+}
+
+// validateDataFlowExclusivity is the pure core of ValidateConfig, split out so
+// it can be unit-tested without constructing a tfsdk.Config.
+//
+// Note on null-ness: settings_json is Optional+Computed with a "{}" default, but
+// defaults are applied during plan, not to the config — so an unset
+// settings_json really is null here.
+func validateDataFlowExclusivity(cfg dataFlowModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if cfg.Settings != nil && !cfg.SettingsJSON.IsNull() {
+		diags.AddAttributeError(path.Root("settings"),
+			"Conflicting configuration: settings and settings_json",
+			"Set either the typed `settings` block or the deprecated `settings_json` string, "+
+				"not both. They write the same API field, so the provider will not guess which "+
+				"one you meant. Prefer `settings`; `settings_json` is deprecated.")
+	}
+	if cfg.Schedule != nil && !cfg.SchedulersJSON.IsNull() {
+		diags.AddAttributeError(path.Root("schedule"),
+			"Conflicting configuration: schedule and schedulers_json",
+			"Set either the typed `schedule` block or the deprecated `schedulers_json` string, "+
+				"not both. They write the same API field (top-level \"schedulers\"), so the "+
+				"provider will not guess which one you meant. Prefer `schedule`; "+
+				"`schedulers_json` is deprecated.")
+	}
+	return diags
+}
+
+// dataFlowSettingsBody renders the typed settings block into the API's settings
+// object (RiverSettings). Unset fields are omitted rather than sent as explicit
+// nulls: the update path deep-merges the body onto the server's current settings
+// and then strips nulls, so an omitted field is preserved either way, and POST
+// accepts a partial settings object (settings_json's "{}" default proves it).
+func dataFlowSettingsBody(s *dataFlowSettingsModel) map[string]any {
+	out := map[string]any{}
+	if s == nil {
+		return out
+	}
+	if !s.RunTimeoutSeconds.IsNull() && !s.RunTimeoutSeconds.IsUnknown() {
+		out["run_timeout_seconds"] = s.RunTimeoutSeconds.ValueInt64()
+	}
+	if n := dataFlowNotificationBody(s.Notification); n != nil {
+		out["notification"] = n
+	}
+	return out
+}
+
+// dataFlowNotificationBody renders NotificationSettings, or nil when no report
+// is configured.
+func dataFlowNotificationBody(n *dataFlowNotificationModel) map[string]any {
+	if n == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if r := dataFlowNotificationReportBody(n.Warning); r != nil {
+		out["warning"] = r
+	}
+	if r := dataFlowNotificationReportBody(n.Failure); r != nil {
+		out["failure"] = r
+	}
+	if r := dataFlowNotificationReportBody(n.RunThreshold); r != nil {
+		out["run_threshold"] = r
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// dataFlowNotificationReportBody renders one RiverNotificationReport, or nil
+// when the report is unset. email/is_enabled are always emitted (email is
+// required by the API; is_enabled defaults to false there too).
+func dataFlowNotificationReportBody(r *dataFlowNotificationReportModel) map[string]any {
+	if r == nil {
+		return nil
+	}
+	out := map[string]any{
+		"email":      r.Email.ValueString(),
+		"is_enabled": r.IsEnabled.ValueBool(),
+	}
+	if !r.ExecutionTimeLimitSeconds.IsNull() && !r.ExecutionTimeLimitSeconds.IsUnknown() {
+		out["execution_time_limit_seconds"] = r.ExecutionTimeLimitSeconds.ValueInt64()
+	}
+	return out
+}
+
+// dataFlowScheduleBody renders the typed schedule block into one RiverSchedule
+// element of the API's top-level "schedulers" list.
+func dataFlowScheduleBody(s *dataFlowScheduleModel) map[string]any {
+	if s == nil {
+		return nil
+	}
+	out := map[string]any{"is_enabled": s.IsEnabled.ValueBool()}
+	if !s.CronExpression.IsNull() && !s.CronExpression.IsUnknown() {
+		out["cron_expression"] = s.CronExpression.ValueString()
+	}
+	return out
 }
 
 // apply maps an API response onto the model, normalizing read shape so an

@@ -70,7 +70,27 @@ resource "boomi_data_flow" "mysql_to_postgres" {
   kind           = "main_river"
   description    = "Example MySQL -> PostgreSQL source-to-target data flow"
 
-  settings_json = jsonencode({ run_timeout_seconds = 180 })
+  # Typed settings block (replaces the deprecated settings_json — setting both
+  # is a configuration error).
+  settings = {
+    run_timeout_seconds = 180
+    notification = {
+      failure = {
+        email      = "data-oncall@example.com"
+        is_enabled = true
+      }
+    }
+  }
+
+  # Typed schedule block (replaces the deprecated schedulers_json). Singular:
+  # the API permits at most one scheduler. Mandatory and must be enabled for CDC
+  # (log-based) flows, where the cron must fire between once per day and 12
+  # times per hour.
+  #
+  # schedule = {
+  #   cron_expression = "0 * * * *"
+  #   is_enabled      = true
+  # }
 
   properties_json = jsonencode({
     source = {
