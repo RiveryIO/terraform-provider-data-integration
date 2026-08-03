@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -47,6 +46,7 @@ type dataFlowModel struct {
 	SchedulersJSON jsontypes.Normalized `tfsdk:"schedulers_json"`
 	GroupID        types.String         `tfsdk:"group_id"`
 	Activate       types.Bool           `tfsdk:"activate"`
+	Status         types.String         `tfsdk:"status"`
 	StepIDs        types.List           `tfsdk:"step_ids"`
 }
 
@@ -160,13 +160,34 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"activate": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
-				Default:  booldefault.StaticBool(false),
-				Description: "Whether to activate (enable) the data flow after create or update. " +
-					"When true the provider runs: disable (if already active) → update → activate. " +
-					"The disable+update step initialises the fire-service task entry that the " +
-					"activate API requires — data flows created via the API lack this entry until " +
-					"their first PUT, so setting activate = true here is the correct way to enable a " +
-					"freshly-created data flow.",
+				Description: "Desired activation state of the data flow. " +
+					"true: the provider enables the flow, running [disable, if it is currently " +
+					"active] → update → [enable_cdc, for a CDC flow] → activate. The update step " +
+					"initialises " +
+					"the fire-service task entry the activate API requires — data flows created " +
+					"through the API lack that entry until their first PUT — and enable_cdc sets " +
+					"ENABLE_LOG on a log-based (CDC) flow, which nothing else does for a flow that " +
+					"is CDC from its very first apply (the endpoint answers 204 when CDC is already " +
+					"enabled, so it is safe to repeat). " +
+					"false: the provider disables the flow if it is currently active. " +
+					"OMITTED: activation is not managed — there is deliberately no default. The " +
+					"provider adopts whatever the server reports (a newly created data flow is " +
+					"disabled) and never activates or disables the flow on later applies. " +
+					"Refresh reconciles this attribute against the API's metadata.river_status, so " +
+					"an activate/disable performed outside this resource — the console, the API, or " +
+					"the data_flow_run resource — shows up as drift on the next plan and, when " +
+					"activate is set explicitly, is corrected on the next apply. When the API omits " +
+					"river_status (observed on a small fraction of data flows) the previously known " +
+					"value is kept. See the read-only status attribute for the raw server value.",
+			},
+			"status": schema.StringAttribute{
+				Computed: true,
+				Description: "Server-side activation status, from the API's metadata.river_status: " +
+					"\"active\" or \"disabled\". Read from the plain data flow GET — this provider is " +
+					"a desired-state tool and never consults the operations/activities layer. Null " +
+					"when the API response omits the field (observed on a small fraction of data " +
+					"flows). Read-only: change activation through activate.",
+				PlanModifiers: []planmodifier.String{activationStatusModifier{}},
 			},
 			"step_ids": schema.ListAttribute{
 				ElementType: types.StringType,
@@ -215,18 +236,69 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	if plan.Activate.ValueBool() {
-		// A PUT after POST initialises the fire-service task entry that
-		// the activate operation requires. Without this step, activation always fails
-		// with RVR-ACTIVATE-500 for API-created data flows.
-		if _, err2 := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body); err2 != nil {
-			addAPIError(&resp.Diagnostics, "Error initialising data flow before activation", err2)
-			return
-		}
-		resp.Diagnostics.Append(r.activateFlow(ctx, envID, plan.ID.ValueString(), dataFlowOpTimeout)...)
+	// Post-create activation. Its diagnostics are surfaced, but state is still
+	// written below: from the POST on, the data flow exists server-side, and
+	// dropping it from state makes the next apply create a duplicate (observed
+	// as duplicate data flows when CDC activation failed midway).
+	activated, activateDiags := r.activateOnCreate(ctx, envID, plan, body)
+	resp.Diagnostics.Append(activateDiags...)
+
+	plan.Status = resolveStatus(plan.Status, created, activated, false)
+	if plan.Activate.IsUnknown() || plan.Activate.IsNull() {
+		// activate was left out of the configuration (it has no default):
+		// record what actually happened instead of guessing.
+		plan.Activate = types.BoolValue(activated)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// activateOnCreate runs the post-POST sequence that turns a freshly created data
+// flow into an active one, in the only order the API accepts:
+//
+//	PUT        initialises the fire-service task entry the activate operation
+//	           requires; without it activation fails with RVR-ACTIVATE-500 on
+//	           every API-created data flow.
+//	enable_cdc only for a CDC (log-based) flow. Such a flow never goes through
+//	           Update's switch-to-CDC transition, so without this nothing ever
+//	           sets ENABLE_LOG: activation reports success while the flow is
+//	           silently not CDC-enabled. The endpoint answers 204 when CDC is
+//	           already enabled, so calling it is safe even if it is redundant.
+//	activate   with the longer CDC timeout for CDC flows, which take noticeably
+//	           longer to reach ACTIVE after enable_cdc.
+//
+// It reports whether the data flow ended up activated. A failure at any step is
+// returned as a diagnostic rather than swallowed — the caller must not treat a
+// partially activated flow as a success.
+func (r *dataFlowResource) activateOnCreate(
+	ctx context.Context, envID string, plan dataFlowModel, body map[string]any,
+) (bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if !plan.Activate.ValueBool() {
+		return false, diags
+	}
+	id := plan.ID.ValueString()
+
+	if _, err := r.data.client.UpdateDataFlow(ctx, envID, id, body); err != nil {
+		addAPIError(&diags, "Error initialising data flow before activation", err)
+		return false, diags
+	}
+
+	isCDC := isCDCFlow(plan.PropertiesJSON.ValueString())
+	if isCDC {
+		diags.Append(r.enableCDC(ctx, envID, id)...)
+		if diags.HasError() {
+			return false, diags
+		}
+	}
+
+	activateTimeout := dataFlowOpTimeout
+	if isCDC {
+		activateTimeout = cdcEnableOpTimeout
+	}
+	activateDiags := r.activateFlow(ctx, envID, id, activateTimeout)
+	diags.Append(activateDiags...)
+	return !activateDiags.HasError(), diags
 }
 
 func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -246,7 +318,159 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state)...)
+
+	// Refresh the activation state from the server. river_status rides along on
+	// the plain data flow GET, so observing activation costs no extra call and —
+	// importantly for a desired-state provider — needs no operations/activities
+	// lookup.
+	//
+	// activate is reconciled here and only here: Create/Update must return
+	// exactly the value Terraform planned, so apply() (shared by all three) must
+	// not touch it. An absent river_status leaves the previously known activate
+	// value alone rather than guessing "disabled".
+	state.Status = statusFromAPI(df)
+	if active, ok := activeFromRiverStatus(df); ok {
+		state.Activate = types.BoolValue(active)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// River activation states, as reported by the API's metadata.river_status
+// (RiverStatusEnum).
+const (
+	riverStatusActive   = "active"
+	riverStatusDisabled = "disabled"
+)
+
+// riverStatus extracts metadata.river_status from a data flow API response body.
+// ok is false when metadata, or river_status inside it, is absent — measured on
+// a small fraction of real GET bodies — so callers can tell "not reported" apart
+// from "disabled" instead of writing a bogus value.
+func riverStatus(api map[string]any) (string, bool) {
+	meta, isMap := api["metadata"].(map[string]any)
+	if !isMap {
+		return "", false
+	}
+	status := asString(meta["river_status"])
+	if status == "" {
+		return "", false
+	}
+	return status, true
+}
+
+// statusFromAPI maps metadata.river_status onto the status attribute, leaving it
+// null when the API does not report one.
+func statusFromAPI(api map[string]any) types.String {
+	if status, ok := riverStatus(api); ok {
+		return types.StringValue(status)
+	}
+	return types.StringNull()
+}
+
+// activeFromRiverStatus reports whether a data flow is active according to
+// metadata.river_status. ok is false when the API does not report a status.
+func activeFromRiverStatus(api map[string]any) (active, ok bool) {
+	status, ok := riverStatus(api)
+	if !ok {
+		return false, false
+	}
+	return status == riverStatusActive, true
+}
+
+// resolveStatus decides the status value an apply writes to state.
+//
+//   - When Terraform planned a concrete value — including a deliberate null —
+//     that value is returned unchanged. Anything else would break Terraform's
+//     plan==apply consistency contract; the next refresh reconciles it. Keeping
+//     this first means a mis-scoped plan modifier can only ever leave status
+//     stale for one refresh, never fail an apply.
+//   - Otherwise (status planned as unknown) report what this apply achieved.
+//     Deliberately not read back from the write response: the PUT runs while the
+//     data flow is disabled, so its metadata.river_status says "disabled" even on
+//     an apply that activates the flow. What the provider does know is which
+//     activation calls it made and that they polled through to success.
+//   - Failing that (create without activation, or an activation step that
+//     errored) fall back to the API response, which may legitimately carry no
+//     river_status at all.
+func resolveStatus(planned types.String, api map[string]any, activated, deactivated bool) types.String {
+	if !planned.IsUnknown() {
+		return planned
+	}
+	switch {
+	case activated:
+		return types.StringValue(riverStatusActive)
+	case deactivated:
+		return types.StringValue(riverStatusDisabled)
+	default:
+		return statusFromAPI(api)
+	}
+}
+
+// activationStatusModifier keeps the Computed status attribute plan-consistent.
+//
+// Terraform proposes the PRIOR value for a Computed attribute the configuration
+// cannot touch, so returning a different value after apply is a "Provider
+// produced inconsistent result after apply" error. status genuinely changes
+// during an apply that activates or disables the flow, so it is marked unknown
+// for exactly those plans. Marking it unknown unconditionally would be worse: it
+// would turn every refresh-only plan into a permanent no-op update
+// (status: "active" -> (known after apply)).
+type activationStatusModifier struct{}
+
+func (activationStatusModifier) Description(_ context.Context) string {
+	return "Planned as \"known after apply\" when the apply will activate or disable the data flow."
+}
+
+func (m activationStatusModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (activationStatusModifier) PlanModifyString(
+	ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse,
+) {
+	// Nothing to adjust on create (no prior state — the framework already plans
+	// an unknown status) or destroy (no plan).
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var planActivate, stateActivate types.Bool
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("activate"), &planActivate)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("activate"), &stateActivate)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if statusMayChange(planActivate, stateActivate, req.StateValue) {
+		resp.PlanValue = types.StringUnknown()
+		return
+	}
+	// Otherwise plan exactly what state holds — including a null status, for the
+	// data flows whose API response carries no river_status at all. Terraform
+	// plans a null Computed attribute as unknown, which would otherwise surface
+	// as a no-op "update in place" on every single plan.
+	resp.PlanValue = req.StateValue
+}
+
+// statusMayChange reports whether an apply can move the data flow's
+// river_status.
+//
+//   - A planned activation different from the recorded one will activate or
+//     disable the flow. An unknown/null planned activate errs on "may change".
+//   - A recorded status that contradicts the recorded activation (left behind by
+//     an apply whose activation step errored) can still be repaired by this
+//     apply.
+//   - A status the API never reported stays unreported: nothing to plan.
+func statusMayChange(planActivate, stateActivate types.Bool, stateStatus types.String) bool {
+	if planActivate.IsUnknown() || planActivate.IsNull() {
+		return true
+	}
+	if planActivate.ValueBool() != stateActivate.ValueBool() {
+		return true
+	}
+	if stateStatus.IsNull() || stateStatus.IsUnknown() {
+		return false
+	}
+	return (stateStatus.ValueString() == riverStatusActive) != stateActivate.ValueBool()
 }
 
 func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -257,6 +481,15 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	envID := plan.EnvironmentID.ValueString()
+
+	// activate has no default, so an unknown/null planned value means "not
+	// managed" — keep the flow in whatever state it is currently in. Otherwise
+	// the plan value is the desired state and drives disable/activate below.
+	wantActive := plan.Activate.ValueBool()
+	if plan.Activate.IsUnknown() || plan.Activate.IsNull() {
+		wantActive = state.Activate.ValueBool()
+	}
+	wasActive := state.Activate.ValueBool()
 
 	// Inject stored step_ids so existing steps keep their IDs across updates.
 	// New steps (beyond the stored count) get no step_id — the API generates them.
@@ -287,9 +520,15 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
-	if plan.Activate.ValueBool() {
+	deactivated := false
+	if wantActive || wasActive {
 		// Disable before editing — the API requires the data flow to be inactive
-		// during a PUT when it was previously active.
+		// during a PUT when it is currently active. Gating on wasActive (the
+		// refreshed server state — see Read) as well as wantActive means this also
+		// fires on an activate true -> false transition, and since we do not
+		// re-activate below when wantActive is false, that single disable call is
+		// what makes activate = false actually disable the flow instead of being a
+		// silently-ignored write-intent.
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
@@ -298,6 +537,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 		}
+		deactivated = wasActive && !wantActive
 	}
 
 	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
@@ -310,23 +550,35 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// After switching to CDC, CDC must be enabled before the data flow can run.
-	// This is a one-time operation that sets ENABLE_LOG=true on the data flow.
-	if switchingToCDC {
+	// CDC must be enabled before a CDC data flow can run: the operation sets
+	// ENABLE_LOG=true. Run it when this update switches the flow into CDC, and
+	// also whenever we are about to activate a CDC flow — a flow created as CDC
+	// with activate omitted/false has never been through either path, so this is
+	// what makes "flip activate to true later" work. The endpoint answers 204
+	// (no operation) when CDC is already enabled, so the redundant call in the
+	// already-enabled case is a cheap no-op rather than a re-initialisation.
+	isCDC := isCDCFlow(plan.PropertiesJSON.ValueString())
+	if switchingToCDC || (isCDC && wantActive) {
 		resp.Diagnostics.Append(r.enableCDC(ctx, envID, plan.ID.ValueString())...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
 
-	if plan.Activate.ValueBool() {
+	activated := false
+	if wantActive {
 		// CDC data flows take longer to activate after enabling CDC — use the extended timeout.
 		activateTimeout := dataFlowOpTimeout
-		if switchingToCDC {
+		if isCDC {
 			activateTimeout = cdcEnableOpTimeout
 		}
-		resp.Diagnostics.Append(r.activateFlow(ctx, envID, plan.ID.ValueString(), activateTimeout)...)
+		activateDiags := r.activateFlow(ctx, envID, plan.ID.ValueString(), activateTimeout)
+		resp.Diagnostics.Append(activateDiags...)
+		activated = !activateDiags.HasError()
 	}
+
+	plan.Activate = types.BoolValue(wantActive)
+	plan.Status = resolveStatus(plan.Status, updated, activated, deactivated)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -548,7 +800,13 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 		m.Type = types.StringValue(t)
 	}
 
-	// description <- metadata.description
+	// description <- metadata.description.
+	//
+	// activate and status are NOT set here on purpose. Both depend on the caller:
+	// Read reconciles them from metadata.river_status, while Create/Update must
+	// return the value Terraform planned (see resolveStatus) — a write response
+	// reports the status the flow had mid-apply, which is not what the apply
+	// achieved.
 	if meta, ok := api["metadata"].(map[string]any); ok {
 		if d := asString(meta["description"]); d != "" {
 			m.Description = types.StringValue(d)
