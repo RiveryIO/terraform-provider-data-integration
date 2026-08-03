@@ -51,11 +51,23 @@
 #   - No commits since the last tag  -> log + exit 0, no release.
 #   - Latest commit contains `[skip release]` -> log + exit 0, no release.
 
-name: Auto Release
+name: Auto Release (DISABLED)
 
+# DISABLED IN CODE, not only via the Actions API.
+#
+# The original trigger was:
+#
+#   on:
+#     push:
+#       branches: [main]
+#
+# It is deliberately replaced with `workflow_dispatch` so this workflow cannot
+# fire on a merge to `main` even if someone runs `gh workflow enable`. Re-enabling
+# it properly means restoring the `push` trigger above AND fixing the ruleset (see
+# the header comment) — not just flipping the API flag. Left dispatch-only rather
+# than deleted so the tag/bump logic stays reviewable and testable by hand.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # Serialize releases: if two merges land close together, run them one at a time
 # so we never compute/push two tags concurrently or double-release.
