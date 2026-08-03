@@ -1,3 +1,31 @@
+# =============================================================================
+# DISABLED (2026-08-03) - do not rely on this workflow to cut releases.
+#
+# Disabled at the API level via `gh workflow disable "Auto Release"`, so it no
+# longer runs on push to `main`. The YAML below is left intact and unmodified:
+# the logic is correct, it is the repository configuration that blocks it.
+#
+# Root cause: a GitHub repository ruleset restricts tag creation, and
+# `github-actions[bot]` is not exempt from it. The "Create and push tag" step
+# computed the right version (v1.1.0) and then failed to push:
+#
+#   remote: error: GH013: Repository rule violations found for refs/tags/v1.1.0.
+#   remote: - Cannot create ref due to creations being restricted.
+#    ! [remote rejected] v1.1.0 -> v1.1.0 (push declined due to repository rule violations)
+#
+# `compute-tag` failed on every run since 2026-07-27 (4/4, all on `main`). This
+# is also why v0.7.0 and v1.0.0 had to be tagged by hand.
+#
+# To re-enable (`gh workflow enable "Auto Release"`), one of these must happen
+# first, or it will simply fail the same way again:
+#   1. Exempt `github-actions[bot]` from the tag-creation restriction in the
+#      ruleset (Settings > Rules > Rulesets - add it to the bypass list), or
+#   2. Push the tag with a PAT that holds a ruleset bypass, instead of the
+#      default GITHUB_TOKEN.
+# Releases are cut manually in the meantime: push a `v*` tag, which triggers
+# release.yml (`push: tags`) and GoReleaser.
+# =============================================================================
+
 # Auto Release workflow.
 #
 # On every merge to `main`, computes the next semantic version from the
@@ -23,11 +51,23 @@
 #   - No commits since the last tag  -> log + exit 0, no release.
 #   - Latest commit contains `[skip release]` -> log + exit 0, no release.
 
-name: Auto Release
+name: Auto Release (DISABLED)
 
+# DISABLED IN CODE, not only via the Actions API.
+#
+# The original trigger was:
+#
+#   on:
+#     push:
+#       branches: [main]
+#
+# It is deliberately replaced with `workflow_dispatch` so this workflow cannot
+# fire on a merge to `main` even if someone runs `gh workflow enable`. Re-enabling
+# it properly means restoring the `push` trigger above AND fixing the ruleset (see
+# the header comment) — not just flipping the API flag. Left dispatch-only rather
+# than deleted so the tag/bump logic stays reviewable and testable by hand.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # Serialize releases: if two merges land close together, run them one at a time
 # so we never compute/push two tags concurrently or double-release.
