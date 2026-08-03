@@ -73,7 +73,10 @@ output "discovered_columns" {
 
 ### Optional
 
+- `date_range` (Attributes) One of the three mutually-exclusive incremental modes (date_range / running_number / epoch — only date_range is exposed here), mirroring the spec's DateRange shape. Emitted as every table's details.date_range. Only valid when extract_method is not "all" — setting this with extract_method "all" (or unset) is a config error; set extract_method to "incremental" instead. (see [below for nested schema](#nestedatt--date_range))
 - `environment_id` (String) Environment ID. Falls back to the provider default.
+- `extract_method` (String) The extract_method to stamp onto every discovered table's details in schemas_json. One of the RDBMS ExtractMethodEnum values: "all", "incremental", "log", "change_tracking", "system_versioning". Defaults to "all" (today's full-reload behaviour) when unset. Use "incremental" together with incremental_field and date_range to generate an incremental mapping instead.
+- `incremental_field` (String) The source column driving the increment (e.g. an updated_at timestamp or an auto-increment id). Emitted as every table's details.incremental_field. Only valid when extract_method is not "all" — setting this with extract_method "all" (or unset) is a config error; set extract_method to "incremental" instead.
 - `schema` (String) The source schema/database to introspect (e.g. the MySQL database name). Omit to let the source use its connection default.
 - `tables` (List of String) Specific tables to discover. Omit to discover all tables in the schema. Each named table is introspected with its own metadata pull request and the results are merged.
 - `timeouts` (Block, Optional) How long to wait for the metadata discovery to finish. (see [below for nested schema](#nestedblock--timeouts))
@@ -82,7 +85,32 @@ output "discovered_columns" {
 
 - `id` (String) Synthetic id: "<connection_id>:<datasource>:<schema>".
 - `schemas` (Attributes List) The discovered schemas as typed nested objects, sorted by name. (see [below for nested schema](#nestedatt--schemas))
-- `schemas_json` (String) The discovered mapping as a JSON string in the exact `properties.schemas[]` shape a source-to-target data flow expects. Feed it into a data flow's `properties_json` via `jsondecode(...)`. Each table entry is `{run_type_and_datasource:"multi_tables", details:{name, is_selected, target_table, extract_method:"all", modified_columns:[{name,type,is_selected}]}}`.
+- `schemas_json` (String) The discovered mapping as a JSON string in the exact `properties.schemas[]` shape a source-to-target data flow expects. Feed it into a data flow's `properties_json` via `jsondecode(...)`. Each table entry is `{run_type_and_datasource:"multi_tables", details:{name, is_selected, target_table, extract_method:"all" (or the configured extract_method), modified_columns:[{name,type,is_selected}]}}`.
+
+<a id="nestedatt--date_range"></a>
+### Nested Schema for `date_range`
+
+Optional:
+
+- `days_back` (Number) Number of days back to extract, as an alternative to start_date.
+- `end_date` (String) RFC3339 date-time. Leave unset to track forward indefinitely.
+- `include_end_value` (Boolean) Whether to include the end_value boundary in the date range.
+- `round_up` (Boolean) Whether to round the end date up to the next interval boundary.
+- `split_time_intervals` (Attributes) Splits a large extraction window into chunks to bound per-request result size. (see [below for nested schema](#nestedatt--date_range--split_time_intervals))
+- `start_date` (String) RFC3339 date-time. Backfill start when time_period is "custom".
+- `time_period` (String) RiverTimePeriodEnum value, e.g. "custom", "year_to_date", "last_7_days", "month_to_date". Use "custom" with start_date to backfill from a fixed date.
+- `update_increment_on_failures` (Boolean) Whether to advance the increment marker even when the extraction run fails.
+- `utc_offset` (Number) Offset (in hours) applied to the end date.
+
+<a id="nestedatt--date_range--split_time_intervals"></a>
+### Nested Schema for `date_range.split_time_intervals`
+
+Optional:
+
+- `interval_size` (Number) Number of time_interval units per chunk.
+- `time_interval` (String) IntervalTimeExternalEnum value: "dont_split", "minutes", "hours", "days", "weeks", "months", "years".
+
+
 
 <a id="nestedblock--timeouts"></a>
 ### Nested Schema for `timeouts`
