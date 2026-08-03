@@ -107,7 +107,26 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry " +
 					"in cross_reports_predefined[] with \"required\": true must be supplied (e.g. github " +
 					"requires organization AND repositories). See the buildBody note for the value-format " +
-					"rules and how to verify.",
+					"rules and how to verify. " +
+					"EXTRACT_METHOD (per-table, under each schemas[].tables[].details): ExtractMethodEnum " +
+					"is \"all\" | \"incremental\" | \"log\" | \"change_tracking\" | \"system_versioning\". " +
+					"For RDBMS sources this field is enum-validated server-side and the correct spelling " +
+					"is \"incremental\" — NOT \"increment\". (\"increment\" is silently tolerated on " +
+					"SaaS/predefined-report source tables, whose extract_method is an untyped free string, " +
+					"but it is WRONG for database sources and should not be copied from SaaS examples.) " +
+					"Incremental extraction additionally requires details.incremental_field (the source " +
+					"column driving the increment) plus exactly ONE of the three mutually-exclusive mode " +
+					"objects details.date_range / details.running_number / details.epoch — set only one, " +
+					"and set details.is_custom_incremental = false. date_range shape: " +
+					"{time_period: RiverTimePeriodEnum (e.g. \"custom\", \"year_to_date\", \"last_7_days\"), " +
+					"start_date, end_date (RFC3339 or null), days_back, include_end_value, " +
+					"split_time_intervals: {time_interval: IntervalTimeExternalEnum (e.g. \"dont_split\", " +
+					"\"days\"), interval_size}, update_increment_on_failures, utc_offset, round_up}. To " +
+					"backfill from a fixed date then track forward: time_period=\"custom\" + " +
+					"start_date=\"<date>\", leaving end_date null. " +
+					"boomi_data_integration_source_metadata can generate this whole incremental mapping for " +
+					"you (its extract_method/incremental_field/date_range inputs) — decode its schemas_json " +
+					"output straight into this field.",
 			},
 			"settings_json": schema.StringAttribute{
 				Optional:   true,

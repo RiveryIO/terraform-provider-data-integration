@@ -36,7 +36,10 @@ func TestSourceMetadataSchemaValid(t *testing.T) {
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("source_metadata schema diagnostics: %v", resp.Diagnostics)
 	}
-	for _, want := range []string{"connection_id", "datasource", "schema", "tables", "schemas", "schemas_json"} {
+	for _, want := range []string{
+		"connection_id", "datasource", "schema", "tables", "schemas", "schemas_json",
+		"extract_method", "incremental_field", "date_range",
+	} {
 		if _, ok := resp.Schema.Attributes[want]; !ok {
 			t.Errorf("source_metadata schema missing attribute %q", want)
 		}
@@ -98,7 +101,7 @@ func TestBuildSchemasJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(cannedMetadata), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	js, err := buildSchemasJSON(parseDiscovery(result))
+	js, err := buildSchemasJSON(parseDiscovery(result), incrementalSpec{})
 	if err != nil {
 		t.Fatalf("buildSchemasJSON: %v", err)
 	}
@@ -218,5 +221,120 @@ func TestMergeDiscoveryResult(t *testing.T) {
 	tables := dst["db"].(map[string]any)
 	if len(tables) != 2 || tables["t1"] == nil || tables["t2"] == nil {
 		t.Fatalf("merge did not combine tables: %v", tables)
+	}
+}
+
+// TestBuildSchemasJSONDefaultUnchanged locks schemas_json to its pre-incremental
+// byte-for-byte shape when none of the new extract_method/incremental_field/
+// date_range inputs are set (zero-value incrementalSpec) — the mandatory
+// backward-compatibility requirement for adding incremental support.
+func TestBuildSchemasJSONDefaultUnchanged(t *testing.T) {
+	var result map[string]any
+	if err := json.Unmarshal([]byte(cannedMetadata), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	js, err := buildSchemasJSON(parseDiscovery(result), incrementalSpec{})
+	if err != nil {
+		t.Fatalf("buildSchemasJSON: %v", err)
+	}
+	const want = `[{"name":"rivery_dev","tables":[{"details":{"extract_method":"all","is_selected":true,"modified_columns":[{"is_selected":true,"name":"id","type":"int"},{"is_selected":true,"name":"email","type":"varchar"},{"is_selected":true,"name":"created_at","type":"datetime"}],"name":"customers","target_table":"CUSTOMERS"},"run_type_and_datasource":"multi_tables"},{"details":{"extract_method":"all","is_selected":true,"modified_columns":[{"is_selected":true,"name":"order_id","type":"bigint"},{"is_selected":false,"name":"amount","type":"decimal"}],"name":"orders","target_table":"ORDERS"},"run_type_and_datasource":"multi_tables"}]}]`
+	if js != want {
+		t.Fatalf("schemas_json changed for the default (no incremental inputs) case:\ngot:  %s\nwant: %s", js, want)
+	}
+}
+
+// TestBuildSchemasJSONIncremental verifies extract_method/incremental_field/
+// date_range are stamped onto every table's details when configured, including
+// is_custom_incremental=false and the nested split_time_intervals shape.
+func TestBuildSchemasJSONIncremental(t *testing.T) {
+	var result map[string]any
+	if err := json.Unmarshal([]byte(cannedMetadata), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dateRange := map[string]any{
+		"time_period": "year_to_date",
+		"start_date":  "2024-01-01T00:00:00.000+0000",
+		"split_time_intervals": map[string]any{
+			"time_interval": "dont_split",
+			"interval_size": int64(1),
+		},
+	}
+	js, err := buildSchemasJSON(parseDiscovery(result), incrementalSpec{
+		ExtractMethod:    "incremental",
+		IncrementalField: "updated_at",
+		DateRange:        dateRange,
+	})
+	if err != nil {
+		t.Fatalf("buildSchemasJSON: %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal([]byte(js), &decoded); err != nil {
+		t.Fatalf("schemas_json is not valid JSON: %v\n%s", err, js)
+	}
+	tables := decoded[0]["tables"].([]any)
+	for _, tbl := range tables {
+		details := tbl.(map[string]any)["details"].(map[string]any)
+		if details["extract_method"] != "incremental" {
+			t.Errorf("details.extract_method = %v, want incremental: %v", details["extract_method"], details)
+		}
+		if details["incremental_field"] != "updated_at" {
+			t.Errorf("details.incremental_field = %v, want updated_at: %v", details["incremental_field"], details)
+		}
+		if details["is_custom_incremental"] != false {
+			t.Errorf("details.is_custom_incremental = %v, want false: %v", details["is_custom_incremental"], details)
+		}
+		dr, ok := details["date_range"].(map[string]any)
+		if !ok {
+			t.Fatalf("details.date_range missing or wrong type: %v", details)
+		}
+		if dr["time_period"] != "year_to_date" || dr["start_date"] != "2024-01-01T00:00:00.000+0000" {
+			t.Errorf("date_range top-level fields wrong: %v", dr)
+		}
+		sti, ok := dr["split_time_intervals"].(map[string]any)
+		if !ok || sti["time_interval"] != "dont_split" {
+			t.Errorf("date_range.split_time_intervals wrong: %v", dr["split_time_intervals"])
+		}
+	}
+}
+
+// TestValidateExtractMethodConfig covers the conflicting-config diagnostic:
+// incremental_field/date_range set while extract_method resolves to "all" is
+// a config mistake and must be rejected rather than silently producing a
+// full-reload mapping.
+func TestValidateExtractMethodConfig(t *testing.T) {
+	// Valid: "all" with neither incremental_field nor date_range.
+	if _, _, _, invalid := validateExtractMethodConfig("all", "", false); invalid {
+		t.Errorf("all + no incremental inputs should be valid")
+	}
+	// Valid: "incremental" with incremental_field set.
+	if _, _, _, invalid := validateExtractMethodConfig("incremental", "updated_at", false); invalid {
+		t.Errorf("incremental + incremental_field should be valid")
+	}
+	// Invalid: "all" (explicit) with incremental_field set.
+	attr, summary, detail, invalid := validateExtractMethodConfig("all", "updated_at", false)
+	if !invalid {
+		t.Fatalf("all + incremental_field should be invalid")
+	}
+	if attr.String() != "incremental_field" {
+		t.Errorf("expected error attached to incremental_field, got %q", attr.String())
+	}
+	if summary == "" || detail == "" {
+		t.Errorf("expected non-empty summary/detail, got %q / %q", summary, detail)
+	}
+	// Invalid: "all" (explicit) with date_range set.
+	attr, _, _, invalid = validateExtractMethodConfig("all", "", true)
+	if !invalid {
+		t.Fatalf("all + date_range should be invalid")
+	}
+	if attr.String() != "date_range" {
+		t.Errorf("expected error attached to date_range, got %q", attr.String())
+	}
+	// Invalid: unknown extract_method value entirely.
+	attr, _, _, invalid = validateExtractMethodConfig("bogus", "", false)
+	if !invalid {
+		t.Fatalf("bogus extract_method should be invalid")
+	}
+	if attr.String() != "extract_method" {
+		t.Errorf("expected error attached to extract_method, got %q", attr.String())
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -48,6 +49,27 @@ type smTimeoutsModel struct {
 	Read types.String `tfsdk:"read"`
 }
 
+// smSplitTimeIntervalsModel mirrors the spec's SplitTimeIntervals shape.
+type smSplitTimeIntervalsModel struct {
+	TimeInterval types.String `tfsdk:"time_interval"`
+	IntervalSize types.Int64  `tfsdk:"interval_size"`
+}
+
+// smDateRangeModel mirrors the spec's DateRange shape (one of the three
+// mutually-exclusive incremental modes, alongside running_number/epoch which
+// this data source does not yet expose).
+type smDateRangeModel struct {
+	TimePeriod                types.String               `tfsdk:"time_period"`
+	StartDate                 types.String               `tfsdk:"start_date"`
+	EndDate                   types.String               `tfsdk:"end_date"`
+	DaysBack                  types.Int64                `tfsdk:"days_back"`
+	IncludeEndValue           types.Bool                 `tfsdk:"include_end_value"`
+	SplitTimeIntervals        *smSplitTimeIntervalsModel `tfsdk:"split_time_intervals"`
+	UpdateIncrementOnFailures types.Bool                 `tfsdk:"update_increment_on_failures"`
+	UtcOffset                 types.Int64                `tfsdk:"utc_offset"`
+	RoundUp                   types.Bool                 `tfsdk:"round_up"`
+}
+
 type sourceMetadataModel struct {
 	ID            types.String     `tfsdk:"id"`
 	EnvironmentID types.String     `tfsdk:"environment_id"`
@@ -57,8 +79,50 @@ type sourceMetadataModel struct {
 	Tables        types.List       `tfsdk:"tables"`
 	Timeouts      *smTimeoutsModel `tfsdk:"timeouts"`
 
+	ExtractMethod    types.String      `tfsdk:"extract_method"`
+	IncrementalField types.String      `tfsdk:"incremental_field"`
+	DateRange        *smDateRangeModel `tfsdk:"date_range"`
+
 	Schemas     []smSchemaModel `tfsdk:"schemas"`
 	SchemasJSON types.String    `tfsdk:"schemas_json"`
+}
+
+// extractMethodEnumValues mirrors the spec's ExtractMethodEnum. "all" is the
+// full-reload default; the rest are per-table incremental extraction modes.
+var extractMethodEnumValues = []string{"all", "incremental", "log", "change_tracking", "system_versioning"}
+
+func isValidExtractMethod(v string) bool {
+	for _, e := range extractMethodEnumValues {
+		if v == e {
+			return true
+		}
+	}
+	return false
+}
+
+// validateExtractMethodConfig checks the resolved extract_method (already
+// defaulted to "all" by the caller when unset) together with
+// incremental_field/date_range, returning the offending attribute path and
+// diagnostic summary/detail for the first violation found. invalid is false
+// when the combination is valid.
+func validateExtractMethodConfig(extractMethod, incrementalField string, dateRangeSet bool) (attr path.Path, summary, detail string, invalid bool) {
+	if !isValidExtractMethod(extractMethod) {
+		return path.Root("extract_method"), "Invalid extract_method",
+			fmt.Sprintf("%q is not a valid ExtractMethodEnum value. Valid values: %s.",
+				extractMethod, strings.Join(extractMethodEnumValues, ", ")), true
+	}
+	if extractMethod == "all" && (incrementalField != "" || dateRangeSet) {
+		attr := path.Root("incremental_field")
+		if dateRangeSet {
+			attr = path.Root("date_range")
+		}
+		return attr, "incremental_field/date_range set with extract_method \"all\"",
+			"incremental_field and date_range only apply to incremental extraction and would silently " +
+				"produce a full-reload mapping otherwise. Set extract_method to \"incremental\" (or another " +
+				"non-\"all\" ExtractMethodEnum value), or remove incremental_field/date_range to keep a " +
+				"full-reload mapping.", true
+	}
+	return path.Path{}, "", "", false
 }
 
 func (d *sourceMetadataDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -119,13 +183,90 @@ func (d *sourceMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 					"Each named table is introspected with its own metadata pull request and the " +
 					"results are merged.",
 			},
+			"extract_method": schema.StringAttribute{
+				Optional: true,
+				Description: "The extract_method to stamp onto every discovered table's details in " +
+					"schemas_json. One of the RDBMS ExtractMethodEnum values: \"all\", \"incremental\", " +
+					"\"log\", \"change_tracking\", \"system_versioning\". Defaults to \"all\" (today's " +
+					"full-reload behaviour) when unset. Use \"incremental\" together with " +
+					"incremental_field and date_range to generate an incremental mapping instead.",
+			},
+			"incremental_field": schema.StringAttribute{
+				Optional: true,
+				Description: "The source column driving the increment (e.g. an updated_at timestamp or " +
+					"an auto-increment id). Emitted as every table's details.incremental_field. Only valid " +
+					"when extract_method is not \"all\" — setting this with extract_method \"all\" (or " +
+					"unset) is a config error; set extract_method to \"incremental\" instead.",
+			},
+			"date_range": schema.SingleNestedAttribute{
+				Optional: true,
+				Description: "One of the three mutually-exclusive incremental modes (date_range / " +
+					"running_number / epoch — only date_range is exposed here), mirroring the spec's " +
+					"DateRange shape. Emitted as every table's details.date_range. Only valid when " +
+					"extract_method is not \"all\" — setting this with extract_method \"all\" (or unset) " +
+					"is a config error; set extract_method to \"incremental\" instead.",
+				Attributes: map[string]schema.Attribute{
+					"time_period": schema.StringAttribute{
+						Optional: true,
+						Description: "RiverTimePeriodEnum value, e.g. \"custom\", \"year_to_date\", " +
+							"\"last_7_days\", \"month_to_date\". Use \"custom\" with start_date to backfill " +
+							"from a fixed date.",
+					},
+					"start_date": schema.StringAttribute{
+						Optional:    true,
+						Description: "RFC3339 date-time. Backfill start when time_period is \"custom\".",
+					},
+					"end_date": schema.StringAttribute{
+						Optional:    true,
+						Description: "RFC3339 date-time. Leave unset to track forward indefinitely.",
+					},
+					"days_back": schema.Int64Attribute{
+						Optional:    true,
+						Description: "Number of days back to extract, as an alternative to start_date.",
+					},
+					"include_end_value": schema.BoolAttribute{
+						Optional:    true,
+						Description: "Whether to include the end_value boundary in the date range.",
+					},
+					"split_time_intervals": schema.SingleNestedAttribute{
+						Optional: true,
+						Description: "Splits a large extraction window into chunks to bound per-request " +
+							"result size.",
+						Attributes: map[string]schema.Attribute{
+							"time_interval": schema.StringAttribute{
+								Optional: true,
+								Description: "IntervalTimeExternalEnum value: \"dont_split\", \"minutes\", " +
+									"\"hours\", \"days\", \"weeks\", \"months\", \"years\".",
+							},
+							"interval_size": schema.Int64Attribute{
+								Optional:    true,
+								Description: "Number of time_interval units per chunk.",
+							},
+						},
+					},
+					"update_increment_on_failures": schema.BoolAttribute{
+						Optional: true,
+						Description: "Whether to advance the increment marker even when the extraction " +
+							"run fails.",
+					},
+					"utc_offset": schema.Int64Attribute{
+						Optional:    true,
+						Description: "Offset (in hours) applied to the end date.",
+					},
+					"round_up": schema.BoolAttribute{
+						Optional:    true,
+						Description: "Whether to round the end date up to the next interval boundary.",
+					},
+				},
+			},
 			"schemas_json": schema.StringAttribute{
 				Computed: true,
 				Description: "The discovered mapping as a JSON string in the exact " +
 					"`properties.schemas[]` shape a source-to-target data flow expects. Feed it into a " +
 					"data flow's `properties_json` via `jsondecode(...)`. Each table entry is " +
 					"`{run_type_and_datasource:\"multi_tables\", details:{name, is_selected, " +
-					"target_table, extract_method:\"all\", modified_columns:[{name,type,is_selected}]}}`.",
+					"target_table, extract_method:\"all\" (or the configured extract_method), " +
+					"modified_columns:[{name,type,is_selected}]}}`.",
 			},
 			"schemas": schema.ListNestedAttribute{
 				Computed:    true,
@@ -220,6 +361,18 @@ func (d *sourceMetadataDataSource) Read(ctx context.Context, req datasource.Read
 		timeout = parsed
 	}
 
+	// extract_method defaults to "all" so schemas_json is byte-for-byte
+	// unchanged when none of the new incremental attributes are set.
+	extractMethod := config.ExtractMethod.ValueString()
+	if extractMethod == "" {
+		extractMethod = "all"
+	}
+	incrementalField := config.IncrementalField.ValueString()
+	if attr, summary, detail, invalid := validateExtractMethodConfig(extractMethod, incrementalField, config.DateRange != nil); invalid {
+		resp.Diagnostics.AddAttributeError(attr, summary, detail)
+		return
+	}
+
 	datasourceID := config.Datasource.ValueString()
 	schemaName := config.Schema.ValueString()
 
@@ -280,7 +433,11 @@ func (d *sourceMetadataDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	schemasJSON, err := buildSchemasJSON(discovered)
+	schemasJSON, err := buildSchemasJSON(discovered, incrementalSpec{
+		ExtractMethod:    extractMethod,
+		IncrementalField: incrementalField,
+		DateRange:        dateRangeToMap(config.DateRange),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error encoding schemas_json", err.Error())
 		return
@@ -471,9 +628,70 @@ func firstPresent(m map[string]any, keys ...string) (any, bool) {
 	return nil, false
 }
 
+// incrementalSpec carries the optional incremental-extraction settings that
+// buildSchemasJSON stamps onto every table's details identically. The zero
+// value reproduces today's full-reload output (extract_method "all", no
+// incremental_field/date_range/is_custom_incremental keys).
+type incrementalSpec struct {
+	ExtractMethod    string
+	IncrementalField string
+	DateRange        map[string]any // nil when the date_range block is absent
+}
+
+// dateRangeToMap converts the configured date_range block into the JSON map
+// emitted at details.date_range, omitting any sub-fields left unset in
+// config. Returns nil when dr is nil (block absent).
+func dateRangeToMap(dr *smDateRangeModel) map[string]any {
+	if dr == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if !dr.TimePeriod.IsNull() && dr.TimePeriod.ValueString() != "" {
+		m["time_period"] = dr.TimePeriod.ValueString()
+	}
+	if !dr.StartDate.IsNull() && dr.StartDate.ValueString() != "" {
+		m["start_date"] = dr.StartDate.ValueString()
+	}
+	if !dr.EndDate.IsNull() && dr.EndDate.ValueString() != "" {
+		m["end_date"] = dr.EndDate.ValueString()
+	}
+	if !dr.DaysBack.IsNull() {
+		m["days_back"] = dr.DaysBack.ValueInt64()
+	}
+	if !dr.IncludeEndValue.IsNull() {
+		m["include_end_value"] = dr.IncludeEndValue.ValueBool()
+	}
+	if dr.SplitTimeIntervals != nil {
+		sti := map[string]any{}
+		if !dr.SplitTimeIntervals.TimeInterval.IsNull() && dr.SplitTimeIntervals.TimeInterval.ValueString() != "" {
+			sti["time_interval"] = dr.SplitTimeIntervals.TimeInterval.ValueString()
+		}
+		if !dr.SplitTimeIntervals.IntervalSize.IsNull() {
+			sti["interval_size"] = dr.SplitTimeIntervals.IntervalSize.ValueInt64()
+		}
+		if len(sti) > 0 {
+			m["split_time_intervals"] = sti
+		}
+	}
+	if !dr.UpdateIncrementOnFailures.IsNull() {
+		m["update_increment_on_failures"] = dr.UpdateIncrementOnFailures.ValueBool()
+	}
+	if !dr.UtcOffset.IsNull() {
+		m["utc_offset"] = dr.UtcOffset.ValueInt64()
+	}
+	if !dr.RoundUp.IsNull() {
+		m["round_up"] = dr.RoundUp.ValueBool()
+	}
+	return m
+}
+
 // buildSchemasJSON renders the discovered schemas into the exact
 // properties.schemas[] shape a source-to-target data flow expects.
-func buildSchemasJSON(schemas []discoveredSchema) (string, error) {
+func buildSchemasJSON(schemas []discoveredSchema, inc incrementalSpec) (string, error) {
+	extractMethod := inc.ExtractMethod
+	if extractMethod == "" {
+		extractMethod = "all"
+	}
 	out := make([]map[string]any, 0, len(schemas))
 	for _, s := range schemas {
 		tables := make([]map[string]any, 0, len(s.Tables))
@@ -482,7 +700,16 @@ func buildSchemasJSON(schemas []discoveredSchema) (string, error) {
 				"name":           t.Name,
 				"is_selected":    true,
 				"target_table":   strings.ToUpper(t.Name),
-				"extract_method": "all",
+				"extract_method": extractMethod,
+			}
+			if inc.IncrementalField != "" {
+				details["incremental_field"] = inc.IncrementalField
+			}
+			if inc.DateRange != nil {
+				details["date_range"] = inc.DateRange
+			}
+			if extractMethod != "all" {
+				details["is_custom_incremental"] = false
 			}
 			if len(t.Columns) > 0 {
 				cols := make([]map[string]any, 0, len(t.Columns))
