@@ -1,0 +1,56 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. Prefer the
+# DATA_INTEGRATION_* env vars for the provider credentials, and NEVER commit the
+# two passwords below.
+
+api_url        = "https://api.integration.rivery.in"
+account_id     = "<account_id>"
+environment_id = "<existing_environment_id>"
+group_id       = "<env_group_cross_id>"
+# api_token    = "<token>"   # better: export DATA_INTEGRATION_API_TOKEN
+
+# ── Which route to build ──────────────────────────────────────────────────────
+create_discovery_driven_flow = true
+create_hand_written_flow     = false
+
+data_flow_name_prefix = "TF_mysql_incremental_to_snowflake"
+
+# ── Incremental extraction ────────────────────────────────────────────────────
+# Backfill everything from 2024-01-01, then track forward on updated_at.
+incremental_field            = "updated_at"
+backfill_start_date          = "2024-01-01T00:00:00.000+0000"
+backfill_split_interval      = "days"
+backfill_split_interval_size = 7
+
+source_tables = ["customers", "orders"]
+
+merge_keys = {
+  customers = ["id"]
+  orders    = ["order_id"]
+}
+
+# ── Scheduling / activation ───────────────────────────────────────────────────
+# Both default to off so a copy-paste apply authors the flow without pulling any
+# data. Flip them once the connections are real.
+activate         = false
+schedule_enabled = false
+schedule_cron    = "0 * * * *" # hourly
+
+# ── MySQL source ──────────────────────────────────────────────────────────────
+mysql_connection_name = "tf-mysql-incremental-source"
+mysql_host            = "<mysql-host>"
+mysql_port            = 3306
+mysql_username        = "<mysql_user>"
+mysql_password        = "<mysql_password>" # keep out of git
+mysql_database        = "<mysql_database>"
+mysql_ssl_mode        = "disabled"
+
+# ── Snowflake target ──────────────────────────────────────────────────────────
+snowflake_connection_name = "tf-snowflake-incremental-target"
+snowflake_account_name    = "<xy12345.us-east-1>"
+snowflake_username        = "<SNOWFLAKE_USER>"
+snowflake_password        = "<snowflake_password>" # keep out of git
+snowflake_warehouse       = "<COMPUTE_WH>"
+snowflake_role            = "<ROLE>"
+snowflake_database        = "<ANALYTICS>"
+snowflake_schema          = "PUBLIC"
+snowflake_merge_method    = "merge"
