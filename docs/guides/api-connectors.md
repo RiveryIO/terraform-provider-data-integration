@@ -91,3 +91,8 @@ Rules that bite:
    `Select…`.
 3. Run a test connection on the source connection — the
    `boomi_data_integration_connection_test` data source does this from Terraform.
+
+## Related
+
+- [Source-to-target: API connectors](../guides/source-to-target-api-connectors) — the rest of the
+  flow shape (`run_type`, `schemas`, `target`) these settings sit inside.
