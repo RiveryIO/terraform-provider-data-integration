@@ -13,16 +13,31 @@ A Data Integration data flow (the API calls this a "river"). The flow definition
 ## Guides
 
 The flow definition itself (`properties_json`) is passed to the API verbatim and is therefore not
-validated by this provider. The contracts you have to get right are documented separately:
+validated by this provider. The contracts you have to get right are documented separately.
+
+Start with the guide for the kind of flow you are building:
+
+- [Source-to-target: API connectors](../guides/source-to-target-api-connectors) — SaaS/API sources,
+  `run_type` `regular` vs `predefined_report`, when `schemas` is present, and the free-form
+  `source.additional_settings`.
+- [Source-to-target: databases](../guides/source-to-target-databases) — RDBMS sources,
+  `run_type = "multi_tables"`, the per-table `details` contract, the `target` union, and why
+  `modified_columns` is a delta rather than a column list.
+- [Logic data flows](../guides/logic-data-flows) — `type = "logic"`, the step and container types,
+  `logicode` steps, loops and conditions, and how `step_ids` is managed for you.
+- [Blueprint data flows](../guides/blueprint-data-flows) — the blueprint/blueprint-file split and
+  how a blueprint is referenced as a source.
+
+Then the cross-cutting contracts:
 
 - [Incremental extraction](../guides/incremental-extraction) — the per-table `extract_method` enum,
   the `incremental` vs `increment` spelling trap, the `incremental_field` +
   exactly-one-of `date_range`/`running_number`/`epoch` rule, and the `date_range` shape.
-- [Native connectors](../guides/native-connectors) — the mandatory
-  `interface_parameters.source[]` Source Settings and how to discover which ones a connector
-  requires.
 - [CDC data flows](../guides/cdc-data-flows) — the mandatory scheduler and its cron bounds, and how
   activation enables CDC.
+- [API connector Source Settings](../guides/api-connectors) — the mandatory
+  `interface_parameters.source[]` Source Settings and how to discover which ones a connector
+  requires.
 
 ## Example Usage
 
@@ -83,7 +98,7 @@ resource "boomi_data_integration_data_flow" "mysql_to_snowflake" {
 ### Required
 
 - `name` (String) Data flow name.
-- `properties_json` (String) The data flow definition as JSON: an object with a properties_type discriminator and, for logic flows, a non-empty logic_steps array. Passed to the API verbatim and config-authoritative — the provider never refreshes it, so drift inside the blob is not detected. Per-table extract_method and native-connector source settings have contracts this provider cannot validate: see the Incremental extraction and Native connectors guides.
+- `properties_json` (String) The data flow definition as JSON: an object with a properties_type discriminator and, for logic flows, a non-empty logic_steps array. Passed to the API verbatim and config-authoritative — the provider never refreshes it, so drift inside the blob is not detected. Per-table extract_method and API-connector source settings have contracts this provider cannot validate: see the Incremental extraction and API connector Source Settings guides.
 - `type` (String) Data flow type. One of: "source_to_target", "logic", "actions", "connector_executor".
 
 ### Optional
@@ -201,8 +216,10 @@ reconciled normally on refresh.
 | `false` | The provider disables the flow if it is currently active. |
 | omitted | Activation is **not managed**. There is deliberately no default: the provider adopts whatever the server reports (a newly created data flow is disabled) and never activates or disables the flow on later applies. |
 
-The `update` step in that sequence is not redundant — it initialises the fire-service task entry the
-activate API requires, which data flows created through the API lack until their first PUT.
+The `update` step in that sequence is not redundant. A data flow created through the API is not yet
+activatable: it has to be updated once before the activate call will accept it, and skipping the PUT
+fails activation with `RVR-ACTIVATE-500` on every API-created flow. The provider always issues that
+PUT, so you never have to sequence it yourself.
 `enable_cdc` sets `ENABLE_LOG` on a log-based flow; see
 [CDC data flows](../guides/cdc-data-flows) for the full sequence.
 
@@ -215,6 +232,9 @@ is kept. The read-only `status` attribute exposes the raw server value.
 ## Logic data flows
 
 For `type = "logic"`, `properties_json` must carry a non-empty `logic_steps` array. The provider
-generates a stable step id per step on first create and injects it into `logic_steps` before every
-write, so `step_id` does not need to appear in your configuration. The generated ids are exposed
-positionally in the read-only `step_ids` list.
+captures the stable step id the API assigns to each top-level step on first create and injects it back
+into `logic_steps` before every write, so `step_id` does not need to appear in your configuration. The
+ids are exposed positionally in the read-only `step_ids` list.
+
+See [Logic data flows](../guides/logic-data-flows) for the step and container types, the `logicode`
+step's `file_id` reference, and the positional caveat on `step_ids`.

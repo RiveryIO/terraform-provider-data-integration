@@ -941,7 +941,7 @@ func (c *Client) TestConnection(ctx context.Context, environmentID string, body 
 // worker fleet to introspect the connection — the same get_db_metadata "pull
 // request" the connection test uses, but here we keep the operation's result
 // payload. The result is the nested {schema:{table:{columns:[...]}}} shape the
-// discover_schema.py helper parses. RDBMS sources only; native/SaaS connectors
+// discover_schema.py helper parses. RDBMS sources only; API/SaaS connectors
 // route metadata differently (TODO).
 
 // SourceMetadataResult is the terminal outcome of a get_db_metadata pull request,

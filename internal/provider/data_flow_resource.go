@@ -133,9 +133,9 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "The data flow definition as JSON: an object with a properties_type " +
 					"discriminator and, for logic flows, a non-empty logic_steps array. Passed to the " +
 					"API verbatim and config-authoritative — the provider never refreshes it, so drift " +
-					"inside the blob is not detected. Per-table extract_method and native-connector " +
+					"inside the blob is not detected. Per-table extract_method and API-connector " +
 					"source settings have contracts this provider cannot validate: see the Incremental " +
-					"extraction and Native connectors guides.",
+					"extraction and API connector Source Settings guides.",
 			},
 			"settings": schema.SingleNestedAttribute{
 				Optional: true,
@@ -819,14 +819,14 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	// (log-based) flows — the API validates that an enabled scheduler is present
 	// before it will create or enable a CDC data flow.
 	//
-	// NATIVE-CONNECTOR SOURCE SETTINGS (verify checklist) — properties_json is
-	// opaque to this provider, so nothing here validates that a native connector's
+	// API-CONNECTOR SOURCE SETTINGS (verify checklist) — properties_json is
+	// opaque to this provider, so nothing here validates that an API connector's
 	// required "Source Settings" are present. They are the fields the console shows
 	// under "Source Settings — Connector settings applied to every report" (marked
 	// with a red *). A data flow created without them saves fine but is unusable (the UI
 	// shows the required dropdowns empty; a run has no scope). To author one correctly:
 	//
-	//  1. Identify a native connector: its data_source_types entry has is_native=true
+	//  1. Identify such a connector: its data_source_types entry has is_native=true
 	//     and feature_flags.run_types=["multi_tables"]; in properties_json the source
 	//     is name="native_connector" with additional_settings.nc_id/nc_version set.
 	//  2. Discover the required settings:

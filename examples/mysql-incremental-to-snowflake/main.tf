@@ -167,7 +167,7 @@ data "boomi_data_integration_source_metadata" "sales" {
   }
 
   timeouts {
-    # Metadata discovery is a worker round-trip against the live database. MySQL
+    # Metadata discovery is a live round-trip against the database itself. MySQL
     # is usually seconds; wide catalogues are minutes. Raise this, don't lower it.
     read = var.discovery_timeout
   }

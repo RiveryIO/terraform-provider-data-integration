@@ -134,12 +134,12 @@ func (d *sourceMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 		Description: "Discovers the schema and columns of an RDBMS source connection, so a " +
 			"source-to-target data flow's table/column mapping is discovered from the live source " +
 			"rather than hand-written. It drives the same `get_db_metadata` \"pull request\" the " +
-			"console's mapping tab uses: the worker fleet opens the connection, introspects the " +
-			"requested schema (and, when given, specific tables), and returns the columns. The " +
+			"console's mapping tab uses: the platform opens a connection to the source, introspects " +
+			"the requested schema (and, when given, specific tables), and returns the columns. The " +
 			"primary output `schemas_json` is a ready-to-use `properties.schemas[]` block — decode it " +
 			"with `jsondecode()` into a data flow's `properties_json`. `schemas` exposes the same " +
 			"discovery as typed nested objects for inspection. RDBMS sources only (mysql, postgres, " +
-			"sqlserver, oracle, …); native/SaaS connector metadata routing is not yet supported.",
+			"sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported.",
 		Blocks: map[string]schema.Block{
 			"timeouts": schema.SingleNestedBlock{
 				Description: "How long to wait for the metadata discovery to finish.",
