@@ -1,31 +1,65 @@
 # =============================================================================
-# OPERATING REQUIREMENT: this workflow needs the `RELEASE_TAG_PAT` repo secret.
+# DISABLED (2026-08-04). Read this whole block before re-enabling anything.
 #
-# The `protect-release-tags` ruleset restricts creation/deletion/non-fast-forward
-# on `refs/tags/v*`. Its only bypass actors are Organization Admins and the repo
-# `Admin` role; `github-actions[bot]` is in neither, so a tag push made with the
-# default GITHUB_TOKEN is rejected:
+# THIS IS NOT A BROKEN WORKFLOW. IT IS A MISSING CREDENTIAL.
+#
+# The YAML below is correct and stays correct. It is disabled only because the
+# repository secret `RELEASE_TAG_PAT` does not exist, and without that secret the
+# tag push cannot get past the `protect-release-tags` ruleset. Disabling is a
+# stop-the-noise measure so merges to `main` stop going red; it is not a fix.
+#
+# WHAT ACTUALLY FAILED LAST TIME. Run 30895966812 (event `push`, branch `main`,
+# 2026-08-04T09:21:33Z) failed on the `Verify release credential is configured`
+# guard step below - the guard doing precisely its job - with:
+#
+#   ##[error]Auto Release cannot push a v* tag: the repository secret
+#   RELEASE_TAG_PAT does not exist. ACTION REQUIRED BY A HUMAN with GitHub
+#   org-admin or repo-Admin rights ...
+#
+# It did NOT fail on the tag push, and no step logic needs changing.
+#
+# WHY THE CREDENTIAL IS NEEDED. Ruleset `protect-release-tags` (id 19163136)
+# restricts creation/deletion/non-fast-forward on `refs/tags/v*`. Its only bypass
+# actors are `OrganizationAdmin` and `RepositoryRole` id 5 (Admin);
+# `github-actions[bot]` is in neither, so a tag push made with the default
+# GITHUB_TOKEN is rejected:
 #
 #   remote: error: GH013: Repository rule violations found for refs/tags/v1.1.0.
 #   remote: - Cannot create ref due to creations being restricted.
 #
-# That is why every run between 2026-07-27 and 2026-08-03 failed at "Create and
-# push tag" (the version was computed correctly each time), and why v0.7.0 and
-# v1.0.0 had to be tagged by hand.
+# That is why the runs between 2026-07-27 and 2026-08-03 died at "Create and push
+# tag" (the version was computed correctly every single time), why the 2026-08-04
+# run died at the guard that was added to replace that opaque GH013, and why
+# v0.7.0 and v1.0.0 had to be tagged by hand.
 #
-# Two ways to make auto-release work. Only (1) is implemented here:
-#   1. IMPLEMENTED - check out with a PAT from an account that already holds
-#      org-admin or repo-Admin, so the tag push bypasses the ruleset the same way
-#      a human push does. Requires the `RELEASE_TAG_PAT` secret; the
-#      "Verify release credential" step below fails fast with instructions if it
-#      is absent, instead of letting the run die on an opaque GH013 later.
-#   2. NOT IMPLEMENTED - add `github-actions[bot]` to the ruleset's bypass actors
-#      (Settings > Rules > Rulesets > protect-release-tags). This needs no secret,
-#      but it weakens tag protection for every workflow in the repo and is a
-#      governance decision for a repo/org admin to make deliberately.
+# TWO WAYS TO MAKE IT ACTUALLY WORK. Do one of these, then restore the `push`
+# trigger below - a one-line change. Keep the guard step and the checkout
+# `token:` line exactly as they are; both are already right.
+#   (a) Create the `RELEASE_TAG_PAT` repository secret, from an account that
+#       already holds GitHub org-admin or the repo `Admin` role: a classic token
+#       with `repo` scope, or a fine-grained token with Contents: Read and write
+#       on this repo, added under Settings > Secrets and variables > Actions.
+#       Trade-off: a long-lived human-owned token that has to be rotated, and the
+#       release identity becomes whoever owns it. Tag protection stays intact.
+#   (b) Add `github-actions[bot]` to the bypass actors of ruleset
+#       `protect-release-tags` (Settings > Rules > Rulesets). Needs no secret and
+#       nothing to rotate, but it weakens tag protection for EVERY workflow in
+#       this repo. That is a governance decision for a repo/org admin to take
+#       deliberately, not a unilateral CI fix.
 #
-# Until the secret exists, cut releases manually: push a `v*` tag, which triggers
-# release.yml (`push: tags`) and GoReleaser.
+# MEANWHILE, RELEASES ARE CUT MANUALLY: push a `v*` tag by hand. That fires
+# release.yml (`push: tags`) and GoReleaser and produces a normal release.
+#
+# DO NOT FLIP THIS AGAIN WITHOUT FIXING THE CREDENTIAL FIRST. History:
+#   #18 (2026-07-27) added the workflow; every merge went red (GH013).
+#   #23 (2026-08-03) disabled it.
+#   #21 (2026-08-03, OmerBor) added the `RELEASE_TAG_PAT` checkout token - the
+#       real fix for the tag push. Still present below. Keep it.
+#   #27 (2026-08-04) re-enabled it and added the fail-fast guard. Still present
+#       below. Keep it. The very next merge failed on the guard (5th failure).
+#   this PR (2026-08-04) disables it again.
+# Re-enabling before (a) or (b) is done will simply turn every merge to `main`
+# red for a 6th time.
 # =============================================================================
 
 # Auto Release workflow.
@@ -63,14 +97,29 @@
 #   - No commits since the last tag  -> log + exit 0, no release.
 #   - Latest commit contains `[skip release]` -> log + exit 0, no release.
 
-name: Auto Release
+name: Auto Release (DISABLED)
 
-# Fires on every merge to `main`. No `workflow_dispatch`: a manual run would
-# attempt a real tag push and GitHub Release, so releases are either automatic
-# on merge or cut by hand with an explicit `v*` tag push.
+# DISABLED IN CODE, not only via the Actions API (`gh workflow disable`).
+#
+# The original trigger, to restore verbatim once `RELEASE_TAG_PAT` exists (or
+# `github-actions[bot]` is a ruleset bypass actor) - see the header comment:
+#
+#   # Fires on every merge to `main`. No `workflow_dispatch`: a manual run would
+#   # attempt a real tag push and GitHub Release, so releases are either automatic
+#   # on merge or cut by hand with an explicit `v*` tag push.
+#   on:
+#     push:
+#       branches: [main]
+#
+# It is deliberately replaced with `workflow_dispatch` only, so that a merge to
+# `main` cannot fire this workflow even if someone runs `gh workflow enable`.
+# A workflow needs at least one trigger to be valid YAML for Actions, hence
+# dispatch rather than nothing. Note that dispatching it by hand will still fail
+# on the credential guard below, which is the correct and intended behaviour
+# while the secret is absent. Left dispatch-only rather than deleted so the
+# bump/tag logic stays reviewable and is one line away from working.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # Serialize releases: if two merges land close together, run them one at a time
 # so we never compute/push two tags concurrently or double-release.
