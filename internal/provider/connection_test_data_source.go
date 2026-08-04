@@ -47,7 +47,7 @@ func (d *connectionTestDataSource) Metadata(_ context.Context, req datasource.Me
 func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Tests whether an existing connection can actually reach its source/target and " +
-			"authenticate, by asking the Data Integration worker fleet to open a real connection and " +
+			"authenticate, by having the platform open a real connection to it and " +
 			"read metadata (a get_db_metadata/get_schemas \"pull request\"). The API has no dedicated " +
 			"test-connection route; this reproduces what the console's \"Test Connection\" button does. " +
 			"The read does NOT fail when the connection is unreachable — instead `success` is false and " +

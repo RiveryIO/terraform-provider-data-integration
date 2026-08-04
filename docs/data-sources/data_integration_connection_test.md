@@ -3,12 +3,12 @@
 page_title: "boomi_data_integration_connection_test Data Source - boomi"
 subcategory: ""
 description: |-
-  Tests whether an existing connection can actually reach its source/target and authenticate, by asking the Data Integration worker fleet to open a real connection and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead success is false and error_message carries the real connector error (e.g. an ORA-* code). Assert on success in a lifecycle precondition/check block if you want a bad connection to fail the plan.
+  Tests whether an existing connection can actually reach its source/target and authenticate, by having the platform open a real connection to it and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead success is false and error_message carries the real connector error (e.g. an ORA-* code). Assert on success in a lifecycle precondition/check block if you want a bad connection to fail the plan.
 ---
 
 # boomi_data_integration_connection_test (Data Source)
 
-Tests whether an existing connection can actually reach its source/target and authenticate, by asking the Data Integration worker fleet to open a real connection and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead `success` is false and `error_message` carries the real connector error (e.g. an ORA-* code). Assert on `success` in a lifecycle precondition/check block if you want a bad connection to fail the plan.
+Tests whether an existing connection can actually reach its source/target and authenticate, by having the platform open a real connection to it and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead `success` is false and `error_message` carries the real connector error (e.g. an ORA-* code). Assert on `success` in a lifecycle precondition/check block if you want a bad connection to fail the plan.
 
 ## Example Usage
 

@@ -45,7 +45,7 @@ func (r *logicodeFileResource) Schema(_ context.Context, _ resource.SchemaReques
 		Description: "A logicode (Python) script file for use in logic data flow logicode steps. " +
 			"The API is create+read only — DELETE and PUT both return 405. " +
 			"Any change to filename or content forces a new resource (new file_id). " +
-			"On destroy, TF removes the resource from state only; the file remains in S3.",
+			"On destroy, TF removes the resource from state only; the file itself is retained by the platform.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,

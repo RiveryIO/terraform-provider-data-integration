@@ -55,8 +55,8 @@ func (d *targetMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 			"Snowflake databases, BigQuery datasets, or Databricks catalogs — so a data flow's " +
 			"target `database_name`/`dataset` can be chosen from the live warehouse rather than " +
 			"hand-typed. It drives the same asynchronous \"pull request\" the console's target picker " +
-			"uses: the worker fleet opens the connection and lists its containers. The result is " +
-			"exposed both as `names` (a `list(string)` — the common flat-array case, e.g. Snowflake " +
+			"uses: the platform opens a connection to the warehouse and lists its containers. The " +
+			"result is exposed both as `names` (a `list(string)` — the common flat-array case, e.g. Snowflake " +
 			"`get_databases`) and as `result_json` (the raw operation result as a passthrough string), " +
 			"so warehouses that return an array of objects are still usable via `jsondecode()`.",
 		Blocks: map[string]schema.Block{

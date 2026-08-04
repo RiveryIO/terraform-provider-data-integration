@@ -112,8 +112,10 @@ reconciled normally on refresh.
 | `false` | The provider disables the flow if it is currently active. |
 | omitted | Activation is **not managed**. There is deliberately no default: the provider adopts whatever the server reports (a newly created data flow is disabled) and never activates or disables the flow on later applies. |
 
-The `update` step in that sequence is not redundant — it initialises the fire-service task entry the
-activate API requires, which data flows created through the API lack until their first PUT.
+The `update` step in that sequence is not redundant. A data flow created through the API is not yet
+activatable: it has to be updated once before the activate call will accept it, and skipping the PUT
+fails activation with `RVR-ACTIVATE-500` on every API-created flow. The provider always issues that
+PUT, so you never have to sequence it yourself.
 `enable_cdc` sets `ENABLE_LOG` on a log-based flow; see
 [CDC data flows](../guides/cdc-data-flows) for the full sequence.
 

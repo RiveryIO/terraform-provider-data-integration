@@ -5,9 +5,9 @@ subcategory: ""
 description: |-
   A Data Integration dataframe — a named parquet store used by logicode (Python) data flows.
   Two storage types exist:
-  • Internal (data-flow-managed): omit connection_settings. Rivery allocates the S3 path automatically and injects STS credentials at runtime. The only creation requirement is name.
-  • File-zone (custom): include connection_settings pointing to a boomi_data_integration_connection that owns the customer's S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
-  The API keys dataframes by name (no separate cross_id is returned). Changing the name forces a new dataframe — existing parquet files at the old S3 path are orphaned.
+  • Internal (data-flow-managed): omit connection_settings. The platform provisions and credentials the underlying storage for you. The only creation requirement is name.
+  • File-zone (custom): include connection_settings pointing to a boomi_data_integration_connection that owns your own S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
+  The API keys dataframes by name (no separate cross_id is returned). Changing the name forces a new dataframe — the parquet files written under the old name are orphaned, not migrated.
 ---
 
 # boomi_data_integration_dataframe (Resource)
@@ -15,10 +15,10 @@ description: |-
 A Data Integration dataframe — a named parquet store used by logicode (Python) data flows.
 
 Two storage types exist:
-  • **Internal** (data-flow-managed): omit `connection_settings`. Rivery allocates the S3 path automatically and injects STS credentials at runtime. The only creation requirement is `name`.
-  • **File-zone** (custom): include `connection_settings` pointing to a `boomi_data_integration_connection` that owns the customer's S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
+  • **Internal** (data-flow-managed): omit `connection_settings`. The platform provisions and credentials the underlying storage for you. The only creation requirement is `name`.
+  • **File-zone** (custom): include `connection_settings` pointing to a `boomi_data_integration_connection` that owns your own S3/GCS/Azure Blob bucket. The connection_settings block is the only field updatable in place.
 
-The API keys dataframes by `name` (no separate cross_id is returned). Changing the name forces a new dataframe — existing parquet files at the old S3 path are orphaned.
+The API keys dataframes by `name` (no separate cross_id is returned). Changing the name forces a new dataframe — the parquet files written under the old name are orphaned, not migrated.
 
 
 
@@ -31,7 +31,7 @@ The API keys dataframes by `name` (no separate cross_id is returned). Changing t
 
 ### Optional
 
-- `connection_settings` (Attributes) Storage connection for a file-zone (custom) dataframe. Omit this block to create an internal (data-flow-managed) dataframe whose S3 path and credentials are managed by Rivery automatically. When present, this block is the only field the API allows to be updated in place. (see [below for nested schema](#nestedatt--connection_settings))
+- `connection_settings` (Attributes) Storage connection for a file-zone (custom) dataframe. Omit this block to create an internal (data-flow-managed) dataframe whose storage and credentials the platform manages automatically. When present, this block is the only field the API allows to be updated in place. (see [below for nested schema](#nestedatt--connection_settings))
 - `environment_id` (String) Environment this dataframe belongs to. Falls back to the provider-level environment_id. Changing it forces a new dataframe.
 
 ### Read-Only

@@ -63,8 +63,8 @@ into the single-element `schedulers` list the API expects.
 Setting `activate = true` makes the provider run, in order:
 
 1. `disable` — only if the flow is currently active.
-2. `update` (PUT) — this initialises the fire-service task entry that the activate API requires.
-   Data flows created through the API do not have that entry until their first PUT.
+2. `update` (PUT) — a data flow created through the API has to be updated once before the activate
+   call will accept it. Skip this and activation fails with `RVR-ACTIVATE-500`.
 3. `enable_cdc` — for a log-based flow. Nothing else sets `ENABLE_LOG` on a flow that is CDC from
    its very first apply. The endpoint answers `204` when CDC is already enabled, so it is safe to
    repeat.
