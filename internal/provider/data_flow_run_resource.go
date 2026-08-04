@@ -54,8 +54,8 @@ func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"from the data flow's own schedule (schedulers_json on boomi_data_integration_data_flow, or " +
 			"the platform scheduler) or with a direct API call from your orchestrator or CI pipeline.",
 		Description: "**Deprecated — will be removed in a future major version.** " +
-			"Triggers a run of a data flow on apply — the Terraform-native way to " +
-			"execute the underlying API's activate + run actions. This is an imperative action " +
+			"Triggers a run of a data flow on apply — a way to execute the underlying " +
+			"API's activate + run actions from Terraform. This is an imperative action " +
 			"modelled as a resource (Terraform provider Actions require Terraform >= 1.14): creating it " +
 			"fires one run; change `triggers` (or replace the resource) to fire another. It does not " +
 			"track run status or reconcile anything on refresh, and destroying it does not cancel or " +

@@ -139,7 +139,7 @@ func (d *sourceMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 			"primary output `schemas_json` is a ready-to-use `properties.schemas[]` block — decode it " +
 			"with `jsondecode()` into a data flow's `properties_json`. `schemas` exposes the same " +
 			"discovery as typed nested objects for inspection. RDBMS sources only (mysql, postgres, " +
-			"sqlserver, oracle, …); native/SaaS connector metadata routing is not yet supported.",
+			"sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported.",
 		Blocks: map[string]schema.Block{
 			"timeouts": schema.SingleNestedBlock{
 				Description: "How long to wait for the metadata discovery to finish.",

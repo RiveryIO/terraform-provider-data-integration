@@ -1,29 +1,31 @@
 ---
-page_title: "Native connectors"
+page_title: "API connector Source Settings"
 subcategory: "Data flows"
 description: |-
-  How to supply a native connector's required Source Settings in a data flow's
+  How to supply an API connector's required Source Settings in a data flow's
   properties_json, and how to discover which settings are mandatory for a given
   connector.
 ---
 
-# Native connectors
+# API connector Source Settings
 
-A **native connector** is a SaaS source whose reports are driven by a shared set of "Source
-Settings" — the fields the console shows under *Source Settings — Connector settings applied to
-every report*, marked with a red asterisk. GitHub is the canonical example: nothing works until you
-name an organization and repositories.
+Some SaaS sources drive every one of their reports from a shared set of "Source Settings" — the
+fields the console shows under *Source Settings — Connector settings applied to every report*, marked
+with a red asterisk. GitHub is the canonical example: nothing works until you name an organization
+and repositories.
 
-Those settings are part of the opaque `properties_json` blob, so **this provider does not validate
+Those settings live inside the opaque `properties_json` blob, so **this provider does not validate
 them**. A data flow created without them saves and applies cleanly, but is unusable: the console
 shows the required dropdowns empty and a run has no scope.
 
-## 1. Recognise a native connector
+## 1. Recognise a connector that needs them
 
 - Its `data_source_types` entry has `is_native = true` and
-  `feature_flags.run_types = ["multi_tables"]`.
-- In `properties_json` its source is `name = "native_connector"`, with
-  `additional_settings.nc_id` / `additional_settings.nc_version` set.
+  `feature_flags.run_types = ["multi_tables"]`. (`is_native` is a literal field name on that
+  catalog — read it, do not interpret it.)
+- In `properties_json` its source is written as the literal `name = "native_connector"`, with
+  `additional_settings.nc_id` / `additional_settings.nc_version` set. These are the exact strings the
+  API accepts; the connector you actually configure is identified by `nc_id`, not by `name`.
 
 The `boomi_data_integration_source_types` data source lists the available source types.
 

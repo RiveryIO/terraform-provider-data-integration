@@ -18,7 +18,7 @@ validated by this provider. The contracts you have to get right are documented s
 - [Incremental extraction](../guides/incremental-extraction) — the per-table `extract_method` enum,
   the `incremental` vs `increment` spelling trap, the `incremental_field` +
   exactly-one-of `date_range`/`running_number`/`epoch` rule, and the `date_range` shape.
-- [Native connectors](../guides/native-connectors) — the mandatory
+- [API connector Source Settings](../guides/api-connectors) — the mandatory
   `interface_parameters.source[]` Source Settings and how to discover which ones a connector
   requires.
 - [CDC data flows](../guides/cdc-data-flows) — the mandatory scheduler and its cron bounds, and how
@@ -83,7 +83,7 @@ resource "boomi_data_integration_data_flow" "mysql_to_snowflake" {
 ### Required
 
 - `name` (String) Data flow name.
-- `properties_json` (String) The data flow definition as JSON: an object with a properties_type discriminator and, for logic flows, a non-empty logic_steps array. Passed to the API verbatim and config-authoritative — the provider never refreshes it, so drift inside the blob is not detected. Per-table extract_method and native-connector source settings have contracts this provider cannot validate: see the Incremental extraction and Native connectors guides.
+- `properties_json` (String) The data flow definition as JSON: an object with a properties_type discriminator and, for logic flows, a non-empty logic_steps array. Passed to the API verbatim and config-authoritative — the provider never refreshes it, so drift inside the blob is not detected. Per-table extract_method and API-connector source settings have contracts this provider cannot validate: see the Incremental extraction and API connector Source Settings guides.
 - `type` (String) Data flow type. One of: "source_to_target", "logic", "actions", "connector_executor".
 
 ### Optional
