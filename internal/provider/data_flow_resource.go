@@ -90,8 +90,9 @@ func (r *dataFlowResource) Metadata(_ context.Context, req resource.MetadataRequ
 func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A Data Integration data flow (the API calls this a \"river\"). The flow " +
-			"definition is supplied as JSON via properties_json; this keeps the resource forward-" +
-			"compatible with the full data flow schema without re-modelling every field.",
+			"definition is supplied as JSON via properties_json, which keeps the resource forward-" +
+			"compatible with the full data flow schema without re-modelling every field; schedule " +
+			"and settings are typed blocks.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -129,50 +130,19 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"properties_json": schema.StringAttribute{
 				Required:   true,
 				CustomType: jsontypes.NormalizedType{},
-				Description: "The data flow properties object as JSON — must include a properties_type " +
-					"discriminator and (for logic flows) a non-empty logic_steps array. This value " +
-					"is config-authoritative: the API enriches it on write (logic_steps gain " +
-					"step_id/is_enabled/…), so the provider keeps your configured value and does not " +
-					"refresh it from the API. Drift inside this blob is therefore not detected. " +
-					"NATIVE CONNECTORS (run_type=\"multi_tables\", is_native — e.g. github): their " +
-					"required Source Settings live under source.additional_settings.interface_parameters." +
-					"source[] and are NOT validated by this provider. Discover the mandatory ones with " +
-					"GET .../data_source_properties/global_properties?datasource_id=<slug> — every entry " +
-					"in cross_reports_predefined[] with \"required\": true must be supplied (e.g. github " +
-					"requires organization AND repositories). See the buildBody note for the value-format " +
-					"rules and how to verify. " +
-					"EXTRACT_METHOD (per-table, under each schemas[].tables[].details): ExtractMethodEnum " +
-					"is \"all\" | \"incremental\" | \"log\" | \"change_tracking\" | \"system_versioning\". " +
-					"For RDBMS sources this field is enum-validated server-side and the correct spelling " +
-					"is \"incremental\" — NOT \"increment\". (\"increment\" is silently tolerated on " +
-					"SaaS/predefined-report source tables, whose extract_method is an untyped free string, " +
-					"but it is WRONG for database sources and should not be copied from SaaS examples.) " +
-					"Incremental extraction additionally requires details.incremental_field (the source " +
-					"column driving the increment) plus exactly ONE of the three mutually-exclusive mode " +
-					"objects details.date_range / details.running_number / details.epoch — set only one, " +
-					"and set details.is_custom_incremental = false. date_range shape: " +
-					"{time_period: RiverTimePeriodEnum (e.g. \"custom\", \"year_to_date\", \"last_7_days\"), " +
-					"start_date, end_date (RFC3339 or null), days_back, include_end_value, " +
-					"split_time_intervals: {time_interval: IntervalTimeExternalEnum (e.g. \"dont_split\", " +
-					"\"days\"), interval_size}, update_increment_on_failures, utc_offset, round_up}. To " +
-					"backfill from a fixed date then track forward: time_period=\"custom\" + " +
-					"start_date=\"<date>\", leaving end_date null. " +
-					"boomi_data_integration_source_metadata can generate this whole incremental mapping for " +
-					"you (its extract_method/incremental_field/date_range inputs) — decode its schemas_json " +
-					"output straight into this field.",
+				Description: "The data flow definition as JSON: an object with a properties_type " +
+					"discriminator and, for logic flows, a non-empty logic_steps array. Passed to the " +
+					"API verbatim and config-authoritative — the provider never refreshes it, so drift " +
+					"inside the blob is not detected. Per-table extract_method and native-connector " +
+					"source settings have contracts this provider cannot validate: see the Incremental " +
+					"extraction and Native connectors guides.",
 			},
 			"settings": schema.SingleNestedAttribute{
 				Optional: true,
-				Description: "Typed data flow settings — the structured replacement for the deprecated " +
-					"settings_json. Mirrors the API's RiverSettings schema exactly: run_timeout_seconds " +
-					"plus a notification block, and nothing else. " +
-					"MUTUALLY EXCLUSIVE with settings_json — setting both is a configuration error. " +
-					"Config-authoritative like properties_json: the API normalises settings on write " +
-					"(it adds/completes the notification block), so the provider keeps your configured " +
-					"value and does not refresh this block from the API. Drift inside it is therefore " +
-					"not detected. Fields you omit are omitted from the write body; because the update " +
-					"path is a read-modify-write, an omitted field keeps whatever the data flow already " +
-					"has on the server rather than being reset.",
+				Description: "Typed data flow settings, mirroring the API's RiverSettings schema: " +
+					"run_timeout_seconds plus a notification block, and nothing else. Mutually " +
+					"exclusive with the deprecated settings_json. Config-authoritative and " +
+					"server-merged — see \"Config-authoritative attributes\" below.",
 				Attributes: map[string]schema.Attribute{
 					"run_timeout_seconds": schema.Int64Attribute{
 						Optional: true,
@@ -218,36 +188,27 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"RiverSettings schema (run_timeout_seconds + notification). settings_json keeps " +
 					"working for now and is planned for removal in a future major version.",
 				Description: "The data flow settings object as JSON. Defaults to an empty object. " +
-					"Config-authoritative like properties_json (the API adds a notification block " +
-					"on write); the provider does not refresh it from the API. " +
-					"DEPRECATED in favour of the typed `settings` block; the two are mutually exclusive.",
+					"Config-authoritative — not refreshed from the API. DEPRECATED in favour of the " +
+					"typed `settings` block; setting both is a configuration error.",
 			},
 			"schedule": schema.SingleNestedAttribute{
 				Optional: true,
-				Description: "Typed data flow schedule — the structured replacement for the deprecated " +
-					"schedulers_json. SINGULAR: the API field is a top-level \"schedulers\" list but " +
-					"exactly one scheduler is allowed, so this provider models one block and wraps it " +
-					"into the single-element list the API expects. " +
-					"MUTUALLY EXCLUSIVE with schedulers_json — setting both is a configuration error. " +
-					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
-					"data flow without an enabled scheduler (\"Please schedule a CDC data flow before " +
-					"enabling or creating\"), and the cron must run between once per day and 12 times " +
-					"per hour (i.e. a 5-minute-to-24-hour interval). Optional for non-CDC flows. " +
-					"Config-authoritative like properties_json/settings: the provider keeps your " +
-					"configured value and does not refresh it from the API.",
+				Description: "Typed data flow schedule, mirroring one element of the API's top-level " +
+					"\"schedulers\" list. Singular because the API accepts at most one scheduler, and " +
+					"mutually exclusive with the deprecated schedulers_json. Optional for non-CDC " +
+					"flows; required and cron-bounded for CDC (log-based) flows — see the CDC data " +
+					"flows guide.",
 				Attributes: map[string]schema.Attribute{
 					"cron_expression": schema.StringAttribute{
 						Optional: true,
 						Description: "5-field UNIX cron expression (e.g. \"0 * * * *\" for hourly). " +
-							"The schedule must fire between once per day and 12 times per hour — a " +
-							"5-minute-to-24-hour interval. Anything outside that band is rejected for " +
-							"CDC (log-based) data flows.",
+							"CDC (log-based) flows must fire between once per day and 12 times per " +
+							"hour; see the CDC data flows guide.",
 					},
 					"is_enabled": schema.BoolAttribute{
 						Optional: true,
 						Description: "Whether the schedule is active. Omitted means false, matching the " +
-							"API's default. Must be true for CDC (log-based) data flows — the API " +
-							"refuses to create or enable a CDC data flow whose scheduler is disabled.",
+							"API's default. Must be true for CDC (log-based) data flows.",
 					},
 				},
 			},
@@ -258,15 +219,11 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"RiverSchedule schema and is singular because the API permits at most one " +
 					"scheduler. schedulers_json keeps working for now and is planned for removal in " +
 					"a future major version.",
-				Description: "The data flow schedule as a JSON array, sent top-level as \"schedulers\". " +
-					"Each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
-					"REQUIRED for CDC (log-based) data flows: the API rejects creating or enabling a CDC " +
-					"data flow without an enabled scheduler (\"Please schedule a CDC data flow before enabling " +
-					"or creating\"), and the cron must run between once per day and 12 times per hour " +
-					"(i.e. a 5-minute-to-24-hour interval). Exactly one scheduler is allowed. Optional for " +
-					"non-CDC flows. Config-authoritative like properties_json/settings_json: the provider " +
-					"keeps your configured value and does not refresh it from the API. " +
-					"DEPRECATED in favour of the typed `schedule` block; the two are mutually exclusive.",
+				Description: "The data flow schedule as a JSON array, sent top-level as \"schedulers\"; " +
+					"each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
+					"At most one scheduler is allowed, and CDC (log-based) flows require an enabled one " +
+					"within the platform's cron bounds — see the CDC data flows guide. DEPRECATED in " +
+					"favour of the typed `schedule` block; setting both is a configuration error.",
 			},
 			"group_id": schema.StringAttribute{
 				Optional: true,
@@ -279,43 +236,26 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"activate": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Desired activation state of the data flow. " +
-					"true: the provider enables the flow, running [disable, if it is currently " +
-					"active] → update → [enable_cdc, for a CDC flow] → activate. The update step " +
-					"initialises " +
-					"the fire-service task entry the activate API requires — data flows created " +
-					"through the API lack that entry until their first PUT — and enable_cdc sets " +
-					"ENABLE_LOG on a log-based (CDC) flow, which nothing else does for a flow that " +
-					"is CDC from its very first apply (the endpoint answers 204 when CDC is already " +
-					"enabled, so it is safe to repeat). " +
-					"false: the provider disables the flow if it is currently active. " +
-					"OMITTED: activation is not managed — there is deliberately no default. The " +
-					"provider adopts whatever the server reports (a newly created data flow is " +
-					"disabled) and never activates or disables the flow on later applies. " +
-					"Refresh reconciles this attribute against the API's metadata.river_status, so " +
-					"an activate/disable performed outside this resource — the console, the API, or " +
-					"the data_flow_run resource — shows up as drift on the next plan and, when " +
-					"activate is set explicitly, is corrected on the next apply. When the API omits " +
-					"river_status (observed on a small fraction of data flows) the previously known " +
-					"value is kept. See the read-only status attribute for the raw server value.",
+				Description: "Desired activation state of the data flow. true activates it (the " +
+					"provider runs the disable → update → enable_cdc → activate sequence the API " +
+					"requires), false disables it, and omitting it leaves activation unmanaged — " +
+					"there is deliberately no default. Reconciled on refresh against the API's " +
+					"metadata.river_status, so out-of-band activation shows up as drift; see " +
+					"\"Activation\" below.",
 			},
 			"status": schema.StringAttribute{
 				Computed: true,
-				Description: "Server-side activation status, from the API's metadata.river_status: " +
-					"\"active\" or \"disabled\". Read from the plain data flow GET — this provider is " +
-					"a desired-state tool and never consults the operations/activities layer. Null " +
-					"when the API response omits the field (observed on a small fraction of data " +
-					"flows). Read-only: change activation through activate.",
+				Description: "Server-side activation status from the API's metadata.river_status: " +
+					"\"active\" or \"disabled\", or null when the response omits the field. Read-only: " +
+					"change activation through activate.",
 				PlanModifiers: []planmodifier.String{activationStatusModifier{}},
 			},
 			"step_ids": schema.ListAttribute{
 				ElementType: types.StringType,
 				Computed:    true,
 				Description: "Stable step IDs for logic data flow steps, auto-generated on first create " +
-					"and preserved across updates. The provider injects these into the logic_steps " +
-					"array before each API write so step_id does not need to appear in properties_json. " +
-					"Positional: index 0 corresponds to the first step, index 1 to the second, etc. " +
-					"Non-logic data flows always have an empty list.",
+					"and preserved across updates. Positional: index 0 is the first step. Empty for " +
+					"non-logic data flows. See \"Logic data flows\" below.",
 				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
 			},
 		},
