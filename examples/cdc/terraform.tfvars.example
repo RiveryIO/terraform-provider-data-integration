@@ -1,0 +1,19 @@
+api_url        = "https://api.rivery.io"
+api_token      = "your-api-token"
+account_id     = "your-account-id"
+environment_id = "your-environment-id"
+
+mysql_host     = "mydb.cluster-xxxx.us-east-1.rds.amazonaws.com"
+mysql_port     = 3306
+mysql_username = "replication_user"
+mysql_password = "..."
+mysql_database = "mydb"
+
+snowflake_account   = "xy12345.us-east-1"
+snowflake_username  = "BOOMI_SVC"
+snowflake_password  = "..."
+snowflake_database  = "ANALYTICS"
+snowflake_warehouse = "COMPUTE_WH"
+snowflake_schema    = "PUBLIC"
+
+notification_email = "alerts@example.com"
