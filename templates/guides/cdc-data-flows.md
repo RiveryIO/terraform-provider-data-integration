@@ -15,6 +15,45 @@ selected per table with `extract_method = "log"` inside `properties_json` — se
 
 CDC flows have two rules that non-CDC flows do not.
 
+## Snapshot vs. stream-only
+
+Each table in a CDC flow has two fields that control whether it starts with a
+full-table snapshot or streams from the current log position immediately.
+
+### `migrate_then_stream` — start with a snapshot
+
+Use when the target table is empty and you need historical data loaded first:
+
+```hcl
+details = {
+  table_status = "new_table"
+  cdc_settings = {
+    initiate_table               = true   # run snapshot before streaming
+    overwrite_table_in_migration = false
+  }
+  # ...
+}
+```
+
+### `stream_only` — no snapshot
+
+Use when the target is already populated and you only need changes going forward:
+
+```hcl
+details = {
+  table_status = "tracked"
+  cdc_settings = {
+    initiate_table               = false  # skip snapshot
+    overwrite_table_in_migration = false
+  }
+  # ...
+}
+```
+
+See [`examples/cdc/`](../../examples/cdc/) for both variants in a single runnable configuration.
+
+---
+
 ## A scheduler is mandatory
 
 The API **refuses to create or enable a CDC data flow that has no enabled scheduler**:
