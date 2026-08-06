@@ -94,23 +94,13 @@ rejected for a CDC flow.
 | `*/1 * * * *` | 1 minute | no — faster than 12×/hour |
 | `0 3 * * 0` | 1 week | no — slower than once per day |
 
-Exactly one scheduler is allowed. The typed `schedule` block is singular for that reason; it renders
-into the single-element `schedulers` list the API expects.
+Exactly one scheduler is allowed per CDC flow.
 
-## Activation also enables CDC
+## Activation
 
-Setting `activate = true` makes the provider run, in order:
-
-1. `disable` — only if the flow is currently active.
-2. `update` (PUT) — a data flow created through the API has to be updated once before the activate
-   call will accept it. Skip this and activation fails with `RVR-ACTIVATE-500`.
-3. `enable_cdc` — for a log-based flow. Nothing else sets `ENABLE_LOG` on a flow that is CDC from
-   its very first apply. The endpoint answers `204` when CDC is already enabled, so it is safe to
-   repeat.
-4. `activate`.
-
-`activate = false` disables the flow if it is currently active. Omitting `activate` leaves
-activation unmanaged — there is deliberately no default.
+Set `activate = true` to activate the flow immediately after creation.
+`activate = false` disables it. Omitting `activate` leaves activation
+unmanaged — the provider will not change the flow's active state on apply.
 
 ## Seeding or resetting the source offset
 
@@ -127,11 +117,6 @@ resource. One offset exists per data flow; the wire body is `{"config": {…}}` 
 | `mongodb` | `resume_token` |
 | `oracle` | `scn_offset` (integer) |
 
-The offset **advances on every run**. It is operational state, so the resource is deliberately
-*config-authoritative*: use it to seed a starting position or to reset one, not to continuously
-track where the flow has got to. Terraform will not report the server's advancing offset as drift on
-your desired-state attributes.
-
-The API returns a `400` from the offset `GET` — not a `404` — while the data flow is CDC but no
-offset has materialised yet (nothing has been read from the log). The provider treats that as
-"nothing to read".
+The offset advances on every run. Use `boomi_data_integration_data_flow_cdc_config`
+to seed a starting position or reset the offset — not to track the current position
+continuously.
