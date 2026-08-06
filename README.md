@@ -24,12 +24,12 @@ provider "boomi" {
 }
 ```
 
-See the **[Getting Started guide](docs/guides/getting-started.md)** for a
-step-by-step walkthrough.
+See **[ONBOARDING.md](ONBOARDING.md)** for a step-by-step walkthrough with
+code examples for each resource type.
 
 The **[`examples/complete-environment/`](examples/complete-environment/)** directory
-is the recommended starting point: a fork-and-fill template that creates
-connections and data flows in a single `terraform apply`.
+is the quickest starting point: three connections and two data flows in a single
+`terraform apply`.
 
 ## Examples
 
