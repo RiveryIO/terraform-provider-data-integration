@@ -1,19 +1,16 @@
-# MySQL Aurora (log-based CDC) → Snowflake
+# MySQL (log-based CDC) → Snowflake
 #
 # CDC flows use type = "source_to_target" but require extra per-table fields
 # that control whether the flow starts with a full snapshot or directly from
 # the current binlog position.
 #
-# This file demonstrates two variants in one configuration:
+# Two variants are shown:
 #
 #   "migrate_then_stream"  — full-table snapshot first, then live binlog.
-#                            Use when the Snowflake target table is empty.
+#                            Use when the target table is empty.
 #
 #   "stream_only"          — starts from the current binlog position immediately.
 #                            Use when the target is already populated.
-#
-# The CDC settings live inside each table's `details` block. The key fields
-# are `table_status`, `initiate_table`, and `cdc_settings`.
 
 terraform {
   required_providers {
@@ -24,41 +21,37 @@ terraform {
   }
 }
 
-provider "boomi" {
-  api_url        = var.api_url
-  token          = var.api_token
-  account_id     = var.account_id
-  environment_id = var.environment_id
-}
+# Credentials from environment variables:
+#   DATA_INTEGRATION_API_TOKEN, DATA_INTEGRATION_ACCOUNT_ID,
+#   DATA_INTEGRATION_API_URL, DATA_INTEGRATION_ENVIRONMENT_ID
+provider "boomi" {}
 
 # ── Connections ───────────────────────────────────────────────────────────────
 
 resource "boomi_data_integration_connection" "mysql_cdc" {
-  environment_id = var.environment_id
-  name           = "MySQL Aurora CDC Source"
-  type           = "mysql_cdc"
+  name = "MySQL CDC Source"
+  type = "mysql_cdc"
 
   parameters_json = jsonencode({
-    host     = var.mysql_host
-    port     = var.mysql_port
-    username = var.mysql_username
-    password = var.mysql_password
-    database = var.mysql_database
+    host     = "db.example.com"
+    port     = 3306
+    username = "replication_user"
+    password = "..."
+    database = "mydb"
   })
 }
 
 resource "boomi_data_integration_connection" "snowflake" {
-  environment_id = var.environment_id
-  name           = "Snowflake Target"
-  type           = "snowflake"
+  name = "Snowflake Target"
+  type = "snowflake"
 
   parameters_json = jsonencode({
-    account   = var.snowflake_account
-    username  = var.snowflake_username
-    password  = var.snowflake_password
-    database  = var.snowflake_database
-    warehouse = var.snowflake_warehouse
-    schema    = var.snowflake_schema
+    account   = "xy12345.us-east-1"
+    username  = "SVC_USER"
+    password  = "..."
+    database  = "ANALYTICS"
+    warehouse = "COMPUTE_WH"
+    schema    = "PUBLIC"
   })
 }
 
@@ -66,11 +59,10 @@ resource "boomi_data_integration_connection" "snowflake" {
 # Full snapshot of `orders`, then live streaming. Use on empty targets.
 
 resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
-  environment_id = var.environment_id
-  name           = "MySQL CDC → Snowflake (migrate then stream)"
-  kind           = "main_river"
-  type           = "source_to_target"
-  activate       = true
+  name     = "MySQL CDC → Snowflake (migrate then stream)"
+  kind     = "main_river"
+  type     = "source_to_target"
+  activate = true
 
   properties_json = jsonencode({
     properties_type = "source_to_target"
@@ -87,11 +79,11 @@ resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
     target = {
       name          = "snowflake"
       connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = var.snowflake_schema
-      db            = var.snowflake_database
+      schema        = "PUBLIC"
+      db            = "ANALYTICS"
     }
     schemas = [{
-      name = var.mysql_database
+      name = "mydb"
       tables = [{
         run_type_and_datasource = "multi_tables"
         details = {
@@ -118,15 +110,6 @@ resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
       }]
     }]
   })
-
-  settings_json = jsonencode({
-    run_timeout_seconds = null
-    notification = {
-      failure       = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = null }
-      warning       = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = null }
-      run_threshold = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = 0 }
-    }
-  })
 }
 
 # ── Variant 2: stream_only ────────────────────────────────────────────────────
@@ -134,11 +117,10 @@ resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
 # is already populated and you only need incremental CDC going forward.
 
 resource "boomi_data_integration_data_flow" "orders_cdc_stream" {
-  environment_id = var.environment_id
-  name           = "MySQL CDC → Snowflake (stream only)"
-  kind           = "main_river"
-  type           = "source_to_target"
-  activate       = true
+  name     = "MySQL CDC → Snowflake (stream only)"
+  kind     = "main_river"
+  type     = "source_to_target"
+  activate = true
 
   properties_json = jsonencode({
     properties_type = "source_to_target"
@@ -155,11 +137,11 @@ resource "boomi_data_integration_data_flow" "orders_cdc_stream" {
     target = {
       name          = "snowflake"
       connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = var.snowflake_schema
-      db            = var.snowflake_database
+      schema        = "PUBLIC"
+      db            = "ANALYTICS"
     }
     schemas = [{
-      name = var.mysql_database
+      name = "mydb"
       tables = [{
         run_type_and_datasource = "multi_tables"
         details = {
@@ -185,14 +167,5 @@ resource "boomi_data_integration_data_flow" "orders_cdc_stream" {
         }
       }]
     }]
-  })
-
-  settings_json = jsonencode({
-    run_timeout_seconds = null
-    notification = {
-      failure       = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = null }
-      warning       = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = null }
-      run_threshold = { email = var.notification_email, is_enabled = false, execution_time_limit_seconds = 0 }
-    }
   })
 }

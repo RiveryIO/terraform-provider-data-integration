@@ -1,18 +1,15 @@
 # Complete environment onboarding example.
 #
-# Shows a realistic getting-started configuration: one environment with
-# three connections (Snowflake, Jira, S3) and two data flows
-# (Jira→Snowflake full load + Jira→S3 predefined report).
+# Three connections (Jira, Snowflake, S3) and two data flows in one apply:
+#   - Jira Issues → Snowflake (full load)
+#   - Jira Issues (7 days) → S3 (CSV export)
 #
-# This is the recommended starting point for new teams. Fork it, replace
-# the connection parameters with your own, and run:
+# This is the recommended starting point for new teams. Replace the connection
+# parameter values with your own and run:
 #
 #   terraform init
 #   terraform plan
 #   terraform apply
-#
-# After apply, activate the data flows from the Boomi Data Integration UI
-# or set `activate = true` on each resource.
 
 terraform {
   required_providers {
@@ -23,19 +20,10 @@ terraform {
   }
 }
 
-# Credentials are read from environment variables by default:
-#   DATA_INTEGRATION_API_TOKEN
-#   DATA_INTEGRATION_ACCOUNT_ID
-#   DATA_INTEGRATION_API_URL       (optional, defaults to https://api.rivery.io)
-#   DATA_INTEGRATION_ENVIRONMENT_ID
-#
-# Or pass them as variables (set in terraform.tfvars — never commit credentials).
-provider "boomi" {
-  api_url        = var.api_url
-  token          = var.api_token
-  account_id     = var.account_id
-  environment_id = var.environment_id
-}
+# Credentials from environment variables:
+#   DATA_INTEGRATION_API_TOKEN, DATA_INTEGRATION_ACCOUNT_ID,
+#   DATA_INTEGRATION_API_URL, DATA_INTEGRATION_ENVIRONMENT_ID
+provider "boomi" {}
 
 # ── Connections ───────────────────────────────────────────────────────────────
 
@@ -44,9 +32,9 @@ resource "boomi_data_integration_connection" "jira" {
   type = "jira"
 
   parameters_json = jsonencode({
-    base_url = var.jira_base_url
-    username = var.jira_username
-    password = var.jira_api_token
+    base_url = "https://yourorg.atlassian.net"
+    username = "user@example.com"
+    password = "..."   # Atlassian API token, not user password
   })
 }
 
@@ -55,11 +43,11 @@ resource "boomi_data_integration_connection" "snowflake" {
   type = "snowflake"
 
   parameters_json = jsonencode({
-    account   = var.snowflake_account
-    username  = var.snowflake_username
-    password  = var.snowflake_password
-    database  = var.snowflake_database
-    warehouse = var.snowflake_warehouse
+    account   = "xy12345.us-east-1"
+    username  = "SVC_USER"
+    password  = "..."
+    database  = "ANALYTICS"
+    warehouse = "COMPUTE_WH"
     schema    = "PUBLIC"
   })
 }
@@ -69,10 +57,10 @@ resource "boomi_data_integration_connection" "s3" {
   type = "aws_fz"
 
   parameters_json = jsonencode({
-    aws_access_key    = var.s3_access_key
-    aws_access_secret = var.s3_access_secret
-    region            = var.s3_region
-    bucket_name       = var.s3_bucket
+    aws_access_key    = "AKIA..."
+    aws_access_secret = "..."
+    region            = "us-east-1"
+    bucket_name       = "my-data-bucket"
   })
 }
 
@@ -98,7 +86,7 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
       name          = "snowflake"
       connection_id = boomi_data_integration_connection.snowflake.id
       schema        = "PUBLIC"
-      db            = var.snowflake_database
+      db            = "ANALYTICS"
     }
     schemas = [{
       name = "no_schema"
@@ -147,7 +135,7 @@ resource "boomi_data_integration_data_flow" "jira_weekly_export" {
     target = {
       name          = "aws_fz"
       connection_id = boomi_data_integration_connection.s3.id
-      bucket_name   = var.s3_bucket
+      bucket_name   = "my-data-bucket"
       fz_partition  = "d"
       delimiter     = ","
       source_format = "CSV"

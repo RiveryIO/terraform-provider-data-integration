@@ -1,13 +1,13 @@
-# Example: MySQL Aurora CDC → Snowflake
+# Example: MySQL CDC → Snowflake
 
-Demonstrates **Change Data Capture** (log-based CDC) from MySQL Aurora into
+Demonstrates **Change Data Capture** (log-based CDC) from MySQL into
 Snowflake using two variants of the same table, both in one configuration.
 
 ## What it creates
 
 | Resource | Purpose |
 |---|---|
-| `boomi_data_integration_connection.mysql_cdc` | MySQL Aurora CDC source (type `mysql_cdc`) |
+| `boomi_data_integration_connection.mysql_cdc` | MySQL CDC source (type `mysql_cdc`) |
 | `boomi_data_integration_connection.snowflake` | Snowflake target |
 | `boomi_data_integration_data_flow.orders_cdc_migrate` | CDC flow — full snapshot then live streaming |
 | `boomi_data_integration_data_flow.orders_cdc_stream` | CDC flow — streaming only from current binlog position |
@@ -47,7 +47,7 @@ GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'replication_user'@'%';
 GRANT SELECT ON mydb.* TO 'replication_user'@'%';
 ```
 
-Binary logging must be enabled on the MySQL instance (`binlog_format = ROW`).
+Binary logging must be enabled (`binlog_format = ROW`).
 
 ## Usage
 
