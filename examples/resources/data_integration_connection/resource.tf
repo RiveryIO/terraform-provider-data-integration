@@ -1,0 +1,13 @@
+resource "boomi_data_integration_connection" "example" {
+  name = "Snowflake"
+  type = "snowflake"
+
+  parameters_json = jsonencode({
+    account   = "xy12345.us-east-1"
+    username  = "SVC_USER"
+    password  = "..."
+    database  = "ANALYTICS"
+    warehouse = "COMPUTE_WH"
+    schema    = "PUBLIC"
+  })
+}

@@ -1,0 +1,29 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+A blueprint always requires two resources: `boomi_data_integration_blueprint_file` holds the YAML
+content, and [`boomi_data_integration_blueprint`](data_integration_blueprint) is the named pointer
+to it. The split lets you update YAML in place without changing the blueprint's id — data flows that
+reference the blueprint are unaffected.
+
+## Example Usage
+
+{{ tffile "examples/resources/data_integration_blueprint/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+{{- if .HasImport }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{codefile "shell" .ImportFile }}
+{{- end }}
