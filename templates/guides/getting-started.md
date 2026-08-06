@@ -6,21 +6,19 @@ description: |-
 
 # Getting Started
 
-This guide takes you from zero to a running Terraform-managed data flow in
-Boomi Data Integration.
+## What this provider manages
 
-## Prerequisites
+| Resource | What it is |
+|---|---|
+| `boomi_data_integration_connection` | Authenticated link to a source or target system (Jira, Snowflake, MySQL, S3, …) |
+| `boomi_data_integration_data_flow` | A data movement job — reads from one connection, writes to another |
+| `boomi_data_integration_environment` | A logical workspace grouping connections and data flows |
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.3
-- A Boomi Data Integration account and at least one environment
-- An API token (generate from **Settings → API Tokens** in the UI)
-- Your **account ID** (Settings → Account) and **environment ID** (Environments page → URL)
+---
 
-## 1 — Configure the provider
+## 1 — Install the provider
 
-Create a `main.tf`:
-
-```terraform
+```hcl
 terraform {
   required_providers {
     boomi = {
@@ -30,61 +28,80 @@ terraform {
   }
 }
 
-provider "boomi" {
-  api_url        = "https://api.rivery.io"
-  token          = var.api_token      # use a variable — never hardcode
-  account_id     = var.account_id
-  environment_id = var.environment_id
-}
+provider "boomi" {}
 ```
 
-The provider also reads credentials from environment variables
-(`DATA_INTEGRATION_API_TOKEN`, `DATA_INTEGRATION_ACCOUNT_ID`,
-`DATA_INTEGRATION_ENVIRONMENT_ID`) — attribute values take precedence when both
-are set.
+Run `terraform init` to download the provider from the Terraform Registry.
 
-## 2 — Create a connection
+The provider reads credentials from these environment variables:
 
-Connections authenticate to a data source or target. The `type` field selects
-the connector; `parameters_json` carries the connector-specific settings
-(host, credentials, etc.).
+| Variable | Description | Where to find it |
+|---|---|---|
+| `DATA_INTEGRATION_API_TOKEN` | API token | Settings → API Tokens → Generate |
+| `DATA_INTEGRATION_ACCOUNT_ID` | Account ID | Settings → Account → Account ID |
+| `DATA_INTEGRATION_ENVIRONMENT_ID` | Environment ID | Environments page → click environment → copy from URL |
 
-```terraform
-resource "boomi_data_integration_connection" "snowflake" {
-  name = "Snowflake Production"
-  type = "snowflake"
+---
+
+## 2 — Create connections
+
+A connection authenticates to one system. `parameters_json` carries the
+connector-specific fields (host, credentials, etc.).
+
+`parameters_json` is **write-only** — the provider never reads credential values
+back from the API, so secrets do not end up in Terraform state. Rotating a
+credential is a `terraform apply` after editing the value.
+
+**Jira:**
+
+```hcl
+resource "boomi_data_integration_connection" "jira" {
+  name = "Jira"
+  type = "jira"
 
   parameters_json = jsonencode({
-    account   = var.snowflake_account
-    username  = var.snowflake_username
-    password  = var.snowflake_password
-    database  = var.snowflake_database
-    warehouse = var.snowflake_warehouse
+    base_url = "https://yourorg.atlassian.net"
+    username = "user@example.com"
+    password = "..."   # Atlassian API token
   })
 }
 ```
 
-> **Tip:** `parameters_json` is write-only — the API omits credentials on
-> read. Terraform preserves your configured value and never refreshes it from
-> the API. Rotating a secret is as simple as editing the value and running
-> `terraform apply`.
+**Snowflake:**
 
-To discover the available connection types and their required fields, use the
+```hcl
+resource "boomi_data_integration_connection" "snowflake" {
+  name = "Snowflake"
+  type = "snowflake"
+
+  parameters_json = jsonencode({
+    account   = "xy12345.us-east-1"
+    username  = "SVC_USER"
+    password  = "..."
+    database  = "ANALYTICS"
+    warehouse = "COMPUTE_WH"
+    schema    = "PUBLIC"
+  })
+}
+```
+
+To list all available connection types and their required fields, use the
 [`boomi_data_integration_connection_types`](../data-sources/connection_types.md)
-data source or the [connection-discovery example](../../examples/connection-discovery/).
+data source.
+
+---
 
 ## 3 — Create a data flow
 
-A data flow moves data from a source connection to a target connection. Its
-definition is passed as `properties_json` (a JSON string encoding the source,
-target, and schemas).
+A data flow moves data from a source connection to a target. The source, target,
+and table mapping are passed as `properties_json`.
 
-```terraform
-resource "boomi_data_integration_data_flow" "daily_load" {
+```hcl
+resource "boomi_data_integration_data_flow" "jira_issues" {
   name     = "Jira Issues → Snowflake"
   kind     = "main_river"
   type     = "source_to_target"
-  activate = true   # activate immediately after creation
+  activate = true
 
   properties_json = jsonencode({
     properties_type = "source_to_target"
@@ -99,18 +116,28 @@ resource "boomi_data_integration_data_flow" "daily_load" {
       name          = "snowflake"
       connection_id = boomi_data_integration_connection.snowflake.id
       schema        = "PUBLIC"
-      db            = var.snowflake_database
+      db            = "ANALYTICS"
     }
     schemas = [{
       name = "no_schema"
       tables = [{
         run_type_and_datasource = "single_table"
         details = {
-          name         = "issues"
-          target_table = "jira_issues"
-          is_selected  = true
+          name                       = "issues"
+          target_table               = "jira_issues"
+          is_selected                = true
+          is_custom_incremental      = false
+          exporter_chunk_size        = 30000
+          modified_columns           = []
+          incremental_field          = null
+          date_range                 = null
+          running_number             = null
+          epoch                      = null
+          change_tracking_settings   = null
+          system_versioning_settings = null
+          additional_target_settings = null
+          cdc_settings               = { initiate_table = null, overwrite_table_in_migration = null }
           additional_source_settings = { report_type = "full_table" }
-          # ... other required fields; see the complete-environment example
         }
       }]
     }]
@@ -118,64 +145,82 @@ resource "boomi_data_integration_data_flow" "daily_load" {
 }
 ```
 
-## 4 — Add a scheduler
+Set `activate = true` to activate the flow immediately after creation.
 
-Add a `settings_json` block to run the flow on a schedule:
+---
 
-```terraform
+## 4 — Apply
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+---
+
+## Common patterns
+
+### Rolling-window report
+
+```hcl
+additional_source_settings = {
+  report_type = "predefined"
+  time_period = "last_7_days"   # today | week_to_date | last_7_days | last_30_days | …
+}
+```
+
+### Run schedule and notifications
+
+```hcl
 settings_json = jsonencode({
   run_timeout_seconds = 3600
   notification = {
-    failure = { email = "alerts@example.com", is_enabled = true, execution_time_limit_seconds = null }
-    warning = { email = "alerts@example.com", is_enabled = false, execution_time_limit_seconds = null }
+    failure       = { email = "alerts@example.com", is_enabled = true,  execution_time_limit_seconds = null }
+    warning       = { email = "alerts@example.com", is_enabled = false, execution_time_limit_seconds = null }
     run_threshold = { email = "alerts@example.com", is_enabled = false, execution_time_limit_seconds = 0 }
   }
 })
 ```
 
-## 5 — Apply
+### Import existing resources
 
 ```bash
-terraform init
-terraform plan    # review what will be created
-terraform apply
-```
-
-## Importing existing resources
-
-If you have connections or data flows already created in the UI, import them
-into Terraform state without recreating them:
-
-```bash
-# Import a connection
 terraform import boomi_data_integration_connection.snowflake <env_id>/<connection_id>
-
-# Import a data flow
-terraform import boomi_data_integration_data_flow.daily_load <env_id>/<data_flow_id>
+terraform import boomi_data_integration_data_flow.jira_issues <env_id>/<data_flow_id>
 ```
 
-Find resource IDs by clicking the resource in the UI — the ID appears in the URL.
+Find IDs in the UI — the ID appears in the URL when you click a resource.
 
-## State backends
+### Remote state for teams
 
-Boomi does not host Terraform state. Configure a backend before working in a
-team to avoid state conflicts:
-
-```terraform
+```hcl
 terraform {
   backend "s3" {
     bucket = "my-tfstate"
-    key    = "boomi/integration/terraform.tfstate"
+    key    = "boomi/production/terraform.tfstate"
     region = "us-east-1"
   }
 }
 ```
 
+---
+
+## Examples
+
+| Example | What it shows |
+|---|---|
+| [`data-flow-basic/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/data-flow-basic) | Minimal Jira → Snowflake full-load flow |
+| [`jira-to-snowflake/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/jira-to-snowflake) | Full load vs. rolling-window predefined report |
+| [`cdc/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/cdc) | MySQL CDC — snapshot-then-stream and stream-only |
+| [`mysql-incremental-to-snowflake/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/mysql-incremental-to-snowflake) | Date-range incremental extraction |
+| [`logic-flow/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/logic-flow) | Orchestration: chain flows and SQL steps |
+
+---
+
 ## Next steps
 
-- Browse the guides for all supported flow patterns: [CDC](./cdc-data-flows.md),
-  [Blueprint](./blueprint-data-flows.md), [Logic](./logic-data-flows.md),
-  [Incremental extraction](./incremental-extraction.md)
-- Try the [complete-environment example](../../examples/complete-environment/)
-  for a fork-and-fill-in starter template
-- Try the [CDC example](../../examples/cdc/) for real-time replication
+- [CDC Data Flows](./cdc-data-flows.md) — snapshot + streaming CDC
+- [Blueprint Data Flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
+- [Logic Data Flows](./logic-data-flows.md) — orchestration steps
+- [Incremental Extraction](./incremental-extraction.md) — date-range and running-number modes
