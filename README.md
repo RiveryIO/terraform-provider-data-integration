@@ -27,15 +27,13 @@ provider "boomi" {
 See **[ONBOARDING.md](ONBOARDING.md)** for a step-by-step walkthrough with
 code examples for each resource type.
 
-The **[`examples/complete-environment/`](examples/complete-environment/)** directory
-is the quickest starting point: three connections and two data flows in a single
-`terraform apply`.
+Start with **[`examples/data-flow-basic/`](examples/data-flow-basic/)** for a minimal
+connection + data flow, or browse the full [examples/](examples/) directory.
 
 ## Examples
 
 | Example | What it shows |
 |---|---|
-| [`complete-environment/`](examples/complete-environment/) | Onboarding starter — Jira + Snowflake + S3, two flows |
 | [`source-to-target/`](examples/source-to-target/) | MySQL → PostgreSQL source-to-target |
 | [`source-to-target-bigquery/`](examples/source-to-target-bigquery/) | BigQuery → Snowflake with explicit schema |
 | [`jira-to-snowflake/`](examples/jira-to-snowflake/) | Jira issues: full load + rolling-window report |

@@ -150,7 +150,6 @@ terraform {
 
 | Example | What it shows |
 |---|---|
-| [`complete-environment/`](examples/complete-environment/) | Jira + Snowflake + S3 — three connections, two flows in one apply |
 | [`data-flow-basic/`](examples/data-flow-basic/) | Minimal Jira → Snowflake full-load flow |
 | [`jira-to-snowflake/`](examples/jira-to-snowflake/) | Full load vs. rolling-window predefined report |
 | [`cdc/`](examples/cdc/) | MySQL CDC — snapshot-then-stream and stream-only variants |
