@@ -9,14 +9,22 @@ description: |-
 
 The YAML content backing a Blueprint (the customer-facing term; the API/code term is "recipe"). Reference this resource's id as a blueprint_resource's file_cross_id. Changing filename or content updates this resource in place (its id is stable) — the API supports PUT unlike the logicode file API.
 
+A blueprint always requires two resources: `boomi_data_integration_blueprint_file` holds the YAML
+content, and [`boomi_data_integration_blueprint`](data_integration_blueprint) is the named pointer
+to it. The split lets you update YAML in place without changing the blueprint's id — data flows that
+reference the blueprint are unaffected.
+
 ## Example Usage
 
 ```terraform
-# Upload the blueprint YAML content. The id returned here is what blueprint
-# resources reference as file_cross_id.
 resource "boomi_data_integration_blueprint_file" "posts_api" {
   filename = "posts_api.yaml"
   content  = file("${path.module}/posts_api.yaml")
+}
+
+resource "boomi_data_integration_blueprint" "posts_api" {
+  name          = "Posts API"
+  file_cross_id = boomi_data_integration_blueprint_file.posts_api.id
 }
 ```
 

@@ -1,0 +1,10 @@
+name: posts_api
+version: "1.0"
+
+steps:
+  - name: list_posts
+    method: GET
+    url: "https://jsonplaceholder.typicode.com/posts"
+    response:
+      data_path: ""          # response is a top-level array
+      pagination: none
