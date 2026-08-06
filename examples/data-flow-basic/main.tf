@@ -83,7 +83,3 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     }]
   })
 }
-
-output "connection_jira_id"    { value = boomi_data_integration_connection.jira.id }
-output "connection_sf_id"      { value = boomi_data_integration_connection.snowflake.id }
-output "data_flow_id"          { value = boomi_data_integration_data_flow.jira_issues.id }
