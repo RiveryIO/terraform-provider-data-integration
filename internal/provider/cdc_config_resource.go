@@ -45,9 +45,9 @@ func (r *cdcConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		Description: "The CDC offset configuration for a CDC data flow — the source position " +
 			"the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, " +
-			"oracle scn). NOTE: the offset is operational state that advances every run, so this " +
-			"resource is config-authoritative (drift inside config_json is not reconciled); use it to " +
-			"seed or reset an offset, not to continuously track it.",
+			"oracle scn). Omit config_json to observe the current offset without managing it. " +
+			"Set config_json to seed or reset the offset; remove it afterwards to let the offset " +
+			"advance freely.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -70,12 +70,13 @@ func (r *cdcConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"config_json": schema.StringAttribute{
-				Required:   true,
+				Optional:   true,
+				Computed:   true,
 				CustomType: jsontypes.NormalizedType{},
-				Description: "The CDC offset object as JSON, including a \"datasource_type\" discriminator " +
+				Description: "The current CDC offset as JSON, including a \"datasource_type\" discriminator " +
 					"(e.g. {\"datasource_type\":\"mysql\",\"binlog_file\":\"...\",\"binlog_position\":\"...\"}). " +
-					"Sent to the API wrapped as {\"config\": <this>}. Config-authoritative: kept from " +
-					"configuration, not refreshed from the API.",
+					"Populated automatically from the API on refresh. Set explicitly only to seed or reset " +
+					"the offset; the value is sent to the API wrapped as {\"config\": <this>}.",
 			},
 		},
 	}
@@ -99,14 +100,34 @@ func (r *cdcConfigResource) Create(ctx context.Context, req resource.CreateReque
 }
 
 func (r *cdcConfigResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	// config_json is config-authoritative (the offset advances at runtime, so a
-	// refresh would always show drift). Keep prior state untouched; only the
-	// identity fields are carried forward.
 	var state cdcConfigModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	result, err := r.data.client.GetCDCConfig(ctx, state.EnvironmentID.ValueString(), state.DataFlowID.ValueString())
+	if err != nil {
+		if errors.Is(err, client.ErrNotFound) || errors.Is(err, client.ErrValidation) {
+			// Offset not yet materialized — keep whatever is in state.
+			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+			return
+		}
+		addAPIError(&resp.Diagnostics, "Error reading CDC config", err)
+		return
+	}
+
+	// The API may return {"config": {...}} or just the inner object directly.
+	inner, ok := result["config"]
+	if !ok {
+		inner = result
+	}
+	b, jsonErr := json.Marshal(inner)
+	if jsonErr != nil {
+		resp.Diagnostics.AddError("Error reading CDC config", fmt.Sprintf("failed to marshal API response: %s", jsonErr))
+		return
+	}
+	state.ConfigJSON = jsontypes.NewNormalizedValue(string(b))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -158,12 +179,18 @@ func (r *cdcConfigResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), envID)...)
 }
 
-// set resolves the environment, parses config_json, and POSTs the CDC offset.
+// set resolves the environment and, if config_json is set, POSTs the CDC offset.
 func (r *cdcConfigResource) set(ctx context.Context, plan *cdcConfigModel, diags *diag.Diagnostics, action string) {
 	envID := resolveEnvironmentID(plan.EnvironmentID.ValueString(), r.data)
 	if envID == "" {
 		diags.AddAttributeError(path.Root("environment_id"), "Missing environment_id",
 			"Set environment_id on the resource or environment_id on the provider.")
+		return
+	}
+	plan.ID = plan.DataFlowID
+	plan.EnvironmentID = types.StringValue(envID)
+
+	if plan.ConfigJSON.IsNull() || plan.ConfigJSON.IsUnknown() {
 		return
 	}
 
@@ -177,8 +204,5 @@ func (r *cdcConfigResource) set(ctx context.Context, plan *cdcConfigModel, diags
 	body := map[string]any{"config": config}
 	if err := r.data.client.SetCDCConfig(ctx, envID, plan.DataFlowID.ValueString(), body); err != nil {
 		addAPIError(diags, action, err)
-		return
 	}
-	plan.ID = plan.DataFlowID
-	plan.EnvironmentID = types.StringValue(envID)
 }
