@@ -12,9 +12,14 @@ A Blueprint (the customer-facing term; the API/code term is "recipe"). A bluepri
 ## Example Usage
 
 ```terraform
-resource "boomi_data_integration_blueprint" "example" {
+resource "boomi_data_integration_blueprint_file" "posts_api" {
+  filename = "posts_api.yaml"
+  content  = file("${path.module}/posts_api.yaml")
+}
+
+resource "boomi_data_integration_blueprint" "posts_api" {
   name          = "Posts API"
-  file_cross_id = "your-blueprint-file-id"  # from boomi_data_integration_blueprint_file
+  file_cross_id = boomi_data_integration_blueprint_file.posts_api.id
 }
 ```
 
