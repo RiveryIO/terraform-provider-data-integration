@@ -46,10 +46,10 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name          = "jira"
-      connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "single_table"
-      cdc_settings  = null
+      name                = "jira"
+      connection_id       = boomi_data_integration_connection.jira.id
+      run_type            = "single_table"
+      cdc_settings        = null
       additional_settings = { source_type = "source_to_target" }
     }
     target = {

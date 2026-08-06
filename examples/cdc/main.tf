@@ -91,7 +91,7 @@ resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
           target_table               = "orders_cdc"
           is_selected                = true
           is_custom_incremental      = false
-          table_status               = "new_table"      # full snapshot first
+          table_status               = "new_table" # full snapshot first
           exporter_chunk_size        = 30000
           modified_columns           = []
           incremental_field          = null
@@ -103,7 +103,7 @@ resource "boomi_data_integration_data_flow" "orders_cdc_migrate" {
           additional_target_settings = null
           additional_source_settings = null
           cdc_settings = {
-            initiate_table               = true    # run snapshot before streaming
+            initiate_table               = true # run snapshot before streaming
             overwrite_table_in_migration = false
           }
         }
@@ -149,7 +149,7 @@ resource "boomi_data_integration_data_flow" "orders_cdc_stream" {
           target_table               = "orders_cdc_stream"
           is_selected                = true
           is_custom_incremental      = false
-          table_status               = "tracked"        # already populated; no snapshot
+          table_status               = "tracked" # already populated; no snapshot
           exporter_chunk_size        = 30000
           modified_columns           = []
           incremental_field          = null
@@ -161,7 +161,7 @@ resource "boomi_data_integration_data_flow" "orders_cdc_stream" {
           additional_target_settings = null
           additional_source_settings = null
           cdc_settings = {
-            initiate_table               = false   # skip snapshot
+            initiate_table               = false # skip snapshot
             overwrite_table_in_migration = false
           }
         }

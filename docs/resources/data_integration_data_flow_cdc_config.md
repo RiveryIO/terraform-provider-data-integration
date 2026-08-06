@@ -3,12 +3,12 @@
 page_title: "boomi_data_integration_data_flow_cdc_config Resource - boomi"
 subcategory: ""
 description: |-
-  The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). Omit config_json to observe the current offset without managing it. Set config_json to seed or reset the offset; remove it afterwards to let the offset advance freely.
+  The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
 ---
 
 # boomi_data_integration_data_flow_cdc_config (Resource)
 
-The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). Omit config_json to observe the current offset without managing it. Set config_json to seed or reset the offset; remove it afterwards to let the offset advance freely.
+The CDC offset configuration for a CDC data flow — the source position the next run resumes from (mysql binlog, postgres/sqlserver lsn, mongodb resume token, oracle scn). NOTE: the offset is operational state that advances every run, so this resource is config-authoritative (drift inside config_json is not reconciled); use it to seed or reset an offset, not to continuously track it.
 
 
 
@@ -17,11 +17,11 @@ The CDC offset configuration for a CDC data flow — the source position the nex
 
 ### Required
 
+- `config_json` (String) The CDC offset object as JSON, including a "datasource_type" discriminator (e.g. {"datasource_type":"mysql","binlog_file":"...","binlog_position":"..."}). Sent to the API wrapped as {"config": <this>}. Config-authoritative: kept from configuration, not refreshed from the API.
 - `data_flow_id` (String) cross_id of the CDC data flow this offset belongs to. Changing it forces a new resource.
 
 ### Optional
 
-- `config_json` (String) The current CDC offset as JSON, including a "datasource_type" discriminator (e.g. {"datasource_type":"mysql","binlog_file":"...","binlog_position":"..."}). Populated automatically from the API on refresh. Set explicitly only to seed or reset the offset; the value is sent to the API wrapped as {"config": <this>}.
 - `environment_id` (String) Environment the data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new resource.
 
 ### Read-Only

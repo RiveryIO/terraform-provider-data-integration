@@ -33,7 +33,7 @@ resource "boomi_data_integration_connection" "jira" {
   parameters_json = jsonencode({
     base_url = "https://yourorg.atlassian.net"
     username = "user@example.com"
-    password = "..."   # Jira API token (not user password)
+    password = "..." # Jira API token (not user password)
   })
 }
 
@@ -63,10 +63,10 @@ resource "boomi_data_integration_data_flow" "jira_issues_full" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name          = "jira"
-      connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "single_table"
-      cdc_settings  = null
+      name                = "jira"
+      connection_id       = boomi_data_integration_connection.jira.id
+      run_type            = "single_table"
+      cdc_settings        = null
       additional_settings = { source_type = "source_to_target" }
     }
     target = {
@@ -113,10 +113,10 @@ resource "boomi_data_integration_data_flow" "jira_issues_weekly" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name          = "jira"
-      connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "single_table"
-      cdc_settings  = null
+      name                = "jira"
+      connection_id       = boomi_data_integration_connection.jira.id
+      run_type            = "single_table"
+      cdc_settings        = null
       additional_settings = { source_type = "source_to_target" }
     }
     target = {

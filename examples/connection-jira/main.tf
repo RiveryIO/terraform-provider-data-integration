@@ -16,6 +16,6 @@ resource "boomi_data_integration_connection" "jira" {
   parameters_json = jsonencode({
     base_url = "https://yourorg.atlassian.net"
     username = "user@example.com"
-    password = "..."   # Atlassian API token — Settings → Security → API Tokens
+    password = "..." # Atlassian API token — Settings → Security → API Tokens
   })
 }
