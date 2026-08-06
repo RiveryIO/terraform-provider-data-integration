@@ -38,13 +38,10 @@ provider "boomi" {
 }
 ```
 
-You can also set credentials via environment variables instead of variables:
-
-```bash
-export DATA_INTEGRATION_API_TOKEN="your-token"
-export DATA_INTEGRATION_ACCOUNT_ID="your-account-id"
-export DATA_INTEGRATION_ENVIRONMENT_ID="your-env-id"
-```
+The provider also reads credentials from environment variables
+(`DATA_INTEGRATION_API_TOKEN`, `DATA_INTEGRATION_ACCOUNT_ID`,
+`DATA_INTEGRATION_ENVIRONMENT_ID`) — attribute values take precedence when both
+are set.
 
 ## 2 — Create a connection
 
