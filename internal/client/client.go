@@ -90,29 +90,34 @@ func (e *APIError) Unwrap() error {
 // take the environmentID explicitly, so a single client serves every
 // environment in the account.
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
-	token      string
-	accountID  string
-	maxRetries int
-	backoff    time.Duration
+	httpClient  *http.Client
+	baseURL     string
+	tokenSource TokenSource
+	accountID   string
+	maxRetries  int
+	backoff     time.Duration
 }
 
-// Config configures a Client. Token, BaseURL and AccountID are required.
+// Config configures a Client. BaseURL and AccountID are always required.
+// Exactly one auth mode is required: either Token (the static Data
+// Integration API token), or TokenSource (e.g. a BoomiJWTSource) for callers
+// that authenticate via Boomi Platform JWT. If both are set, TokenSource
+// wins.
 type Config struct {
-	BaseURL    string
-	Token      string
-	AccountID  string
-	HTTPClient *http.Client
-	MaxRetries int
-	Backoff    time.Duration
+	BaseURL     string
+	Token       string
+	TokenSource TokenSource
+	AccountID   string
+	HTTPClient  *http.Client
+	MaxRetries  int
+	Backoff     time.Duration
 }
 
 // New builds a Client from Config, applying defaults and validating that the
 // required credentials are present.
 func New(cfg Config) (*Client, error) {
 	var missing []string
-	if cfg.Token == "" {
+	if cfg.Token == "" && cfg.TokenSource == nil {
 		missing = append(missing, "token")
 	}
 	if cfg.BaseURL == "" {
@@ -138,13 +143,18 @@ func New(cfg Config) (*Client, error) {
 		backoff = defaultBackoff
 	}
 
+	tokenSource := cfg.TokenSource
+	if tokenSource == nil {
+		tokenSource = newStaticTokenSource(cfg.Token)
+	}
+
 	return &Client{
-		httpClient: hc,
-		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
-		token:      cfg.Token,
-		accountID:  cfg.AccountID,
-		maxRetries: retries,
-		backoff:    backoff,
+		httpClient:  hc,
+		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		tokenSource: tokenSource,
+		accountID:   cfg.AccountID,
+		maxRetries:  retries,
+		backoff:     backoff,
 	}, nil
 }
 
@@ -159,15 +169,24 @@ func (c *Client) envPath(environmentID, suffix string) string {
 	return fmt.Sprintf("%s/v1/accounts/%s/environments/%s%s", c.baseURL, c.accountID, environmentID, suffix)
 }
 
-func (c *Client) headers() http.Header {
+// headers builds the per-request header set. Fetching the token can involve
+// network I/O (a Boomi JWT source lazily exchanges on first use), hence ctx
+// and the error return — the static-token source never errors here. The
+// token used is returned alongside the headers so a caller that later hits a
+// 401 can tell Refresh exactly which value went stale.
+func (c *Client) headers(ctx context.Context) (http.Header, string, error) {
+	token, err := c.tokenSource.Token(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolving auth token: %w", err)
+	}
 	h := http.Header{}
-	h.Set("Authorization", "Bearer "+c.token)
+	h.Set("Authorization", "Bearer "+token)
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
 	h.Set("User-Agent", userAgent)
 	// Attribution header — feeds the NR usage dashboard (BDI pattern).
 	h.Set("X-Boomi-Plugin", fmt.Sprintf("%s (account=%s)", userAgent, c.accountID))
-	return h
+	return h, token, nil
 }
 
 // request performs an HTTP call against an already-built absolute URL, with
@@ -184,14 +203,17 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 	}
 
 	var lastErr error
+	authRetried := false
+	skipBackoff := false
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		if attempt > 0 {
+		if attempt > 0 && !skipBackoff {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(c.backoff * time.Duration(attempt)):
 			}
 		}
+		skipBackoff = false
 
 		var reader io.Reader
 		if payload != nil {
@@ -201,7 +223,11 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 		if err != nil {
 			return fmt.Errorf("building request: %w", err)
 		}
-		req.Header = c.headers()
+		h, usedToken, err := c.headers(ctx)
+		if err != nil {
+			return err
+		}
+		req.Header = h
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -221,6 +247,20 @@ func (c *Client) request(ctx context.Context, method, url string, body any, out 
 				return fmt.Errorf("decoding response: %w", err)
 			}
 			return nil
+		case resp.StatusCode == http.StatusUnauthorized && !authRetried:
+			// Refresh and replay the request exactly once. A static token
+			// source returns errStaticTokenNotRefreshable immediately, so
+			// this is a no-op (same single round trip as before) unless the
+			// token source can actually refresh (e.g. a Boomi JWT source).
+			// Passing usedToken lets a concurrency-aware source (BoomiJWTSource)
+			// detect that another goroutine already refreshed past this exact
+			// value and skip a redundant exchange.
+			authRetried = true
+			if _, rerr := c.tokenSource.Refresh(ctx, usedToken); rerr == nil {
+				skipBackoff = true
+				continue // retry once, immediately, with the refreshed token
+			}
+			return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
 		case resp.StatusCode == http.StatusTooManyRequests:
 			// 429 — rate limit hit. Sleep a fixed window then retry.
 			lastErr = &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s", method, url), Details: truncate(respBody)}
@@ -501,7 +541,11 @@ func (c *Client) UploadConnectionFile(ctx context.Context, environmentID, connTy
 	if err != nil {
 		return "", fmt.Errorf("building upload request: %w", err)
 	}
-	req.Header = c.headers()
+	h, _, err := c.headers(ctx)
+	if err != nil {
+		return "", err
+	}
+	req.Header = h
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
@@ -548,7 +592,11 @@ func (c *Client) UploadConnectionFileContent(ctx context.Context, environmentID,
 	if err != nil {
 		return "", fmt.Errorf("building upload request: %w", err)
 	}
-	req.Header = c.headers()
+	h, _, err := c.headers(ctx)
+	if err != nil {
+		return "", err
+	}
+	req.Header = h
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
@@ -1282,7 +1330,11 @@ func (c *Client) blueprintFileMultipart(
 	if err != nil {
 		return out, fmt.Errorf("building request: %w", err)
 	}
-	req.Header = c.headers()
+	h, _, err := c.headers(ctx)
+	if err != nil {
+		return out, err
+	}
+	req.Header = h
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
