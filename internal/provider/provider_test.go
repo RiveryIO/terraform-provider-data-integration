@@ -7,7 +7,9 @@ import (
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // testAccProtoV6ProviderFactories wires the in-process provider for acceptance
@@ -23,11 +25,143 @@ func TestProviderSchemaValid(t *testing.T) {
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("provider schema diagnostics: %v", resp.Diagnostics)
 	}
-	for _, want := range []string{"api_url", "token", "account_id", "environment_id"} {
+	for _, want := range []string{
+		"api_url", "token", "account_id", "environment_id",
+		"boomi_platform_url", "boomi_account_id", "boomi_username", "boomi_api_token",
+	} {
 		if _, ok := resp.Schema.Attributes[want]; !ok {
 			t.Errorf("provider schema missing attribute %q", want)
 		}
 	}
+}
+
+// strVal / nullVal build the tftypes.Value leaves newProviderConfig needs —
+// every provider attribute today is a plain string.
+func strVal(s string) tftypes.Value { return tftypes.NewValue(tftypes.String, s) }
+func nullVal() tftypes.Value        { return tftypes.NewValue(tftypes.String, nil) }
+
+// newProviderConfig builds a tfsdk.Config for Configure tests from the
+// provider's own schema, so it stays in sync as attributes are added.
+// Attributes omitted from values are sent as null, matching an unset HCL
+// argument.
+func newProviderConfig(t *testing.T, p fwprovider.Provider, values map[string]tftypes.Value) tfsdk.Config {
+	t.Helper()
+	schemaResp := &fwprovider.SchemaResponse{}
+	p.Schema(context.Background(), fwprovider.SchemaRequest{}, schemaResp)
+
+	objType := schemaResp.Schema.Type().TerraformType(context.Background()).(tftypes.Object)
+	full := make(map[string]tftypes.Value, len(objType.AttributeTypes))
+	for name, typ := range objType.AttributeTypes {
+		if v, ok := values[name]; ok {
+			full[name] = v
+		} else {
+			full[name] = tftypes.NewValue(typ, nil)
+		}
+	}
+	return tfsdk.Config{Raw: tftypes.NewValue(objType, full), Schema: schemaResp.Schema}
+}
+
+func TestConfigure_StaticToken(t *testing.T) {
+	p := New("test")()
+	req := fwprovider.ConfigureRequest{Config: newProviderConfig(t, p, map[string]tftypes.Value{
+		"api_url":    strVal("http://example.test"),
+		"token":      strVal("tok"),
+		"account_id": strVal("acct"),
+	})}
+	resp := &fwprovider.ConfigureResponse{}
+	p.Configure(context.Background(), req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+}
+
+func TestConfigure_BoomiJWT(t *testing.T) {
+	p := New("test")()
+	req := fwprovider.ConfigureRequest{Config: newProviderConfig(t, p, map[string]tftypes.Value{
+		"api_url":          strVal("http://example.test"),
+		"account_id":       strVal("acct"),
+		"boomi_account_id": strVal("boomi-acct"),
+		"boomi_username":   strVal("user@example.com"),
+		"boomi_api_token":  strVal("boomi-tok"),
+	})}
+	resp := &fwprovider.ConfigureResponse{}
+	p.Configure(context.Background(), req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+}
+
+func TestConfigure_AuthValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		values  map[string]tftypes.Value
+		wantErr string
+	}{
+		{
+			name:    "no auth configured",
+			values:  map[string]tftypes.Value{"account_id": strVal("acct")},
+			wantErr: "Missing authentication",
+		},
+		{
+			name: "token and boomi both set",
+			values: map[string]tftypes.Value{
+				"account_id":       strVal("acct"),
+				"token":            strVal("tok"),
+				"boomi_account_id": strVal("boomi-acct"),
+			},
+			wantErr: "Conflicting authentication configuration",
+		},
+		{
+			name: "partial boomi set (missing api_token)",
+			values: map[string]tftypes.Value{
+				"account_id":       strVal("acct"),
+				"boomi_account_id": strVal("boomi-acct"),
+				"boomi_username":   strVal("user@example.com"),
+			},
+			wantErr: "Missing Boomi API token",
+		},
+		{
+			name: "missing account_id regardless of auth mode",
+			values: map[string]tftypes.Value{
+				"token": strVal("tok"),
+			},
+			wantErr: "Missing account ID",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New("test")()
+			req := fwprovider.ConfigureRequest{Config: newProviderConfig(t, p, tc.values)}
+			resp := &fwprovider.ConfigureResponse{}
+			p.Configure(context.Background(), req, resp)
+			if !resp.Diagnostics.HasError() {
+				t.Fatalf("expected diagnostics containing %q, got none", tc.wantErr)
+			}
+			var found bool
+			for _, d := range resp.Diagnostics {
+				if contains(d.Summary(), tc.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("diagnostics = %v, want one containing %q", resp.Diagnostics, tc.wantErr)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || indexOf(s, substr) >= 0)
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
 
 // TestResourceSchemasValid exercises each resource's Schema so a malformed
