@@ -1,11 +1,5 @@
-# Jira → Snowflake: two data flows via local modules.
-#
-# Plug in your Jira and Snowflake credentials, choose a target database,
-# and both flows are ready. Everything else (column schema, extract settings,
-# loading method) is pre-configured inside each module.
-#
-#   jira_regular    — syncs the Jira "issue" report to one table (regular run)
-#   jira_predefined — syncs one or more Jira built-in reports (user, sprint, …)
+# Provider and connections shared by both flows.
+# Each flow lives in its own file: jira_regular.tf and jira_predefined.tf.
 
 terraform {
   required_providers {
@@ -49,33 +43,3 @@ resource "boomi_data_integration_connection" "snowflake" {
     role      = var.snowflake_role
   })
 }
-
-# ── Flow 1: regular — Jira Issues → one Snowflake table ──────────────────────
-
-module "jira_regular" {
-  source = "./modules/jira-to-snowflake"
-
-  jira_connection_id      = boomi_data_integration_connection.jira.id
-  snowflake_connection_id = boomi_data_integration_connection.snowflake.id
-  target_database         = var.snowflake_database
-  target_table            = "jira_issues"
-  activate                = var.activate
-}
-
-# ── Flow 2: predefined reports — user, sprint, project, … ────────────────────
-
-module "jira_predefined" {
-  source = "./modules/jira-predefined-report-to-snowflake"
-
-  jira_connection_id      = boomi_data_integration_connection.jira.id
-  snowflake_connection_id = boomi_data_integration_connection.snowflake.id
-  target_database         = var.snowflake_database
-  activate                = var.activate
-}
-
-# ── Outputs ───────────────────────────────────────────────────────────────────
-
-output "jira_connection_id"       { value = boomi_data_integration_connection.jira.id }
-output "snowflake_connection_id"  { value = boomi_data_integration_connection.snowflake.id }
-output "jira_regular_flow_id"     { value = module.jira_regular.id }
-output "jira_predefined_flow_id"  { value = module.jira_predefined.id }
