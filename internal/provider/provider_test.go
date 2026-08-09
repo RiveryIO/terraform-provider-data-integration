@@ -35,10 +35,10 @@ func TestProviderSchemaValid(t *testing.T) {
 	}
 }
 
-// strVal / nullVal build the tftypes.Value leaves newProviderConfig needs —
-// every provider attribute today is a plain string.
+// strVal builds the tftypes.Value leaves newProviderConfig needs — every
+// provider attribute today is a plain string. Attributes omitted from a
+// test's values map get their null leaf inline, in newProviderConfig itself.
 func strVal(s string) tftypes.Value { return tftypes.NewValue(tftypes.String, s) }
-func nullVal() tftypes.Value        { return tftypes.NewValue(tftypes.String, nil) }
 
 // newProviderConfig builds a tfsdk.Config for Configure tests from the
 // provider's own schema, so it stays in sync as attributes are added.
