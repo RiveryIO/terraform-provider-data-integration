@@ -110,8 +110,8 @@ resource "boomi_data_integration_data_flow" "posts_to_snowflake" {
 | `source.additional_settings.recipe_id` | The `boomi_data_integration_blueprint` resource's `id`. This is the field the API reads — hence the `recipe` spelling. |
 | `source.additional_settings.source_type` | The literal `blueprint`. |
 
-The `target` block is the same union as any other source-to-target flow — see
-[Source-to-target: databases](../guides/source-to-target-databases#the-target-union).
+The `target` block is the same union as any other data flow — see
+[Loading Methods](../guides/loading-methods#the-target-union).
 
 ## Per-step tables and `interface_parameters`
 

@@ -17,11 +17,11 @@ validated by this provider. The contracts you have to get right are documented s
 
 Start with the guide for the kind of flow you are building:
 
-- [Source-to-target: API connectors](../guides/source-to-target-api-connectors) — SaaS/API sources,
+- [API connector data flows](../guides/api-connector-data-flows) — SaaS/API sources,
   `run_type` `regular` vs `predefined_report`, when `schemas` is present, and the free-form
   `source.additional_settings`.
-- [Source-to-target: databases](../guides/source-to-target-databases) — RDBMS sources,
-  `run_type = "multi_tables"`, the per-table `details` contract, the `target` union, and why
+- [Database data flows](../guides/database-data-flows) — RDBMS sources,
+  `run_type = "multi_tables"`, the per-table `details` contract, and why
   `modified_columns` is a delta rather than a column list.
 - [Logic data flows](../guides/logic-data-flows) — `type = "logic"`, the step and container types,
   `logicode` steps, loops and conditions, and how `step_ids` is managed for you.

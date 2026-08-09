@@ -94,5 +94,5 @@ Rules that bite:
 
 ## Related
 
-- [Source-to-target: API connectors](../guides/source-to-target-api-connectors) — the rest of the
+- [API connector data flows](../guides/api-connector-data-flows) — the rest of the
   flow shape (`run_type`, `schemas`, `target`) these settings sit inside.

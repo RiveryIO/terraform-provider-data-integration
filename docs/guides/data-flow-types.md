@@ -18,21 +18,21 @@ then points you at the detailed guide for whichever value applies.
 
 | `run_type` | What it's for | Guide |
 |---|---|---|
-| `multi_tables` | RDBMS tables (MySQL, Postgres, MSSQL, …), including CDC and Blueprint recipe sources | [Source-to-Target: Databases](./source-to-target-databases.md), [Blueprint Data Flows](./blueprint-data-flows.md) |
-| `regular` | A SaaS/API connector pulling its native object model (e.g. Jira issues) | [Source-to-Target: API Connectors](./source-to-target-api-connectors.md) |
-| `predefined_report` | A SaaS/API connector's built-in report endpoint (date-ranged, pre-aggregated) | [Source-to-Target: API Connectors](./source-to-target-api-connectors.md) |
+| `multi_tables` | RDBMS tables (MySQL, Postgres, MSSQL, …), including CDC and Blueprint recipe sources | [Database Data Flows](./database-data-flows.md), [Blueprint Data Flows](./blueprint-data-flows.md) |
+| `regular` | A SaaS/API connector pulling its native object model (e.g. Jira issues) | [API Connector Data Flows](./api-connector-data-flows.md) |
+| `predefined_report` | A SaaS/API connector's built-in report endpoint (date-ranged, pre-aggregated) | [API Connector Data Flows](./api-connector-data-flows.md) |
 | `custom_query` / `custom` | Hand-written query against a source that supports it | See the connection type's own settings — not covered by a dedicated guide yet |
 | `legacy` | Pre-`RunTypeEnum` flows migrated from the classic console; new flows shouldn't set this | — |
 
 ## Picking one, by scenario
 
 - **Moving RDBMS tables** (with or without CDC) → `multi_tables`, see
-  [Source-to-Target: Databases](./source-to-target-databases.md). For
+  [Database Data Flows](./database-data-flows.md). For
   streaming/log-based CDC specifically, see
   [CDC Data Flows](./cdc-data-flows.md).
 - **Hitting a SaaS/API connector** (Jira, Salesforce, …) → `regular` or
   `predefined_report`, see
-  [Source-to-Target: API Connectors](./source-to-target-api-connectors.md).
+  [API Connector Data Flows](./api-connector-data-flows.md).
   If the connector needs mandatory Source Settings
   (`is_native = true`), see [API Connector Source Settings](./api-connectors.md)
   first.

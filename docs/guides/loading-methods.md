@@ -74,9 +74,28 @@ one deriving from the other:
 See [Extract Methods](./incremental-extraction.md) and
 [CDC Data Flows](./cdc-data-flows.md) for the extract side of this pairing.
 
-Shared fields across every warehouse `target` arm, beyond `loading_method`/
-`merge_method`: `connection_id`, `table_name`, `target_prefix`,
-`single_table_settings`, `file_zone_settings`, `file_path_destination`,
-`is_ordered_merge_key`, `order_expression`, `additional_settings` — see
-[Source-to-Target: Databases](./source-to-target-databases.md#the-target-union)
-for the per-target-type fields on top of these.
+## The `target` union
+
+`target` is discriminated on `name` — which destination you're writing to. This is the same union
+for every source type (database, API connector, or blueprint); it's documented once here rather than
+repeated in each source guide. The API declares only `loading_method` as required per arm, but a
+working flow also needs the connection and the destination container.
+
+| `name` | Destination |
+| --- | --- |
+| `snowflake` | Snowflake — `database_name`, `schema_name` |
+| `bigquery` | BigQuery — `dataset_id`, plus `sql_dialect`, `auto_detect_datatype_changes` |
+| `redshift` | Redshift |
+| `databricks` | Databricks |
+| `azure_synapse_analytics` | Azure Synapse Analytics |
+| `azure_sql` | Azure SQL |
+| `postgres_rds` | PostgreSQL |
+| `athena` | Athena |
+| `s3` | S3 files |
+| `gcs` | Google Cloud Storage files |
+| `blob_storage` | Azure Blob Storage files |
+| `target_email` | Email delivery |
+
+Fields shared by the warehouse arms, beyond `loading_method`/`merge_method`: `connection_id`,
+`table_name`, `target_prefix`, `single_table_settings`, `file_zone_settings`,
+`file_path_destination`, `is_ordered_merge_key`, `order_expression`, `additional_settings`.

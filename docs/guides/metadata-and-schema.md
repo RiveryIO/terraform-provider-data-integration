@@ -99,5 +99,5 @@ data "boomi_data_integration_target_metadata" "snowflake_dbs" {
 
 The discovered names come back as a flat list — check them against the
 `target` union's field table in
-[Source-to-Target: Databases](./source-to-target-databases.md#the-target-union)
+[Loading Methods](./loading-methods.md#the-target-union)
 before writing the actual `target` block.
