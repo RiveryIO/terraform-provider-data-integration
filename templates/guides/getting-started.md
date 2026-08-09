@@ -33,13 +33,18 @@ provider "boomi" {}
 
 Run `terraform init` to download the provider from the Terraform Registry.
 
-The provider reads credentials from these environment variables:
+The quickest path — a Data Integration API token, via environment variables:
 
 | Variable | Description | Where to find it |
 |---|---|---|
 | `DATA_INTEGRATION_API_TOKEN` | API token | Settings → API Tokens → Generate |
 | `DATA_INTEGRATION_ACCOUNT_ID` | Account ID | Settings → Account → Account ID |
 | `DATA_INTEGRATION_ENVIRONMENT_ID` | Environment ID | Environments page → click environment → copy from URL |
+
+Already have Boomi Platform credentials instead? The provider can exchange
+those for a JWT automatically — see the [Authentication](./authentication.md)
+guide for both modes, every parameter, and how the provider decides which one
+you mean.
 
 ---
 
@@ -220,6 +225,7 @@ terraform {
 
 ## Next steps
 
+- [Authentication](./authentication.md) — both auth modes, every parameter, and how the right one gets chosen
 - [CDC Data Flows](./cdc-data-flows.md) — snapshot + streaming CDC
 - [Blueprint Data Flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
 - [Logic Data Flows](./logic-data-flows.md) — orchestration steps
