@@ -1,5 +1,5 @@
 module "jira_predefined" {
-  source = "./modules/jira-predefined-report-to-snowflake"
+  source = "github.com/RiveryIO/terraform-data-integration-modules//modules/jira-predefined-report-to-snowflake"
 
   jira_connection_id      = boomi_data_integration_connection.jira.id
   snowflake_connection_id = boomi_data_integration_connection.snowflake.id
