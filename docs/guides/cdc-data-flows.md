@@ -1,6 +1,6 @@
 ---
 page_title: "CDC data flows"
-subcategory: "Data flows"
+subcategory: "Extract methods"
 description: |-
   Log-based (CDC) data flows: the mandatory scheduler and its cron bounds, how
   the provider enables CDC on activation, and how to seed or reset the source
@@ -98,9 +98,10 @@ Exactly one scheduler is allowed per CDC flow.
 
 ## Activation
 
-Set `activate = true` to activate the flow immediately after creation.
-`activate = false` disables it. Omitting `activate` leaves activation
-unmanaged — the provider will not change the flow's active state on apply.
+`activate = true` triggers CDC's extra `enable_cdc` step alongside the usual
+activation sequence. See [Activation](./activation.md) for the full
+three-state behavior and drift reconciliation, shared by every data flow
+type.
 
 ## Seeding or resetting the source offset
 

@@ -1,6 +1,6 @@
 ---
 page_title: "Logic data flows"
-subcategory: "Data flows"
+subcategory: "Logic"
 description: |-
   The logic_steps contract for type = "logic" data flows: the step and container
   types the API accepts, logicode steps referencing a logicode_file, loops and

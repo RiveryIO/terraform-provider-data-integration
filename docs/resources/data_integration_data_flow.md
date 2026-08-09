@@ -208,26 +208,10 @@ reconciled normally on refresh.
 
 ## Activation
 
-`activate` is the desired activation state, and it has three states, not two:
-
-| `activate` | Behaviour |
-| --- | --- |
-| `true` | The provider enables the flow: `disable` (only if currently active) → `update` → `enable_cdc` (CDC flows only) → `activate`. |
-| `false` | The provider disables the flow if it is currently active. |
-| omitted | Activation is **not managed**. There is deliberately no default: the provider adopts whatever the server reports (a newly created data flow is disabled) and never activates or disables the flow on later applies. |
-
-The `update` step in that sequence is not redundant. A data flow created through the API is not yet
-activatable: it has to be updated once before the activate call will accept it, and skipping the PUT
-fails activation with `RVR-ACTIVATE-500` on every API-created flow. The provider always issues that
-PUT, so you never have to sequence it yourself.
-`enable_cdc` sets `ENABLE_LOG` on a log-based flow; see
-[CDC data flows](../guides/cdc-data-flows) for the full sequence.
-
-Refresh reconciles `activate` against the API's `metadata.river_status`, so an activate/disable
-performed outside this resource — the console, the API, or the `data_flow_run` resource — shows up as
-drift on the next plan and, when `activate` is set explicitly, is corrected on the next apply. When
-the API omits `river_status` (observed on a small fraction of data flows) the previously known value
-is kept. The read-only `status` attribute exposes the raw server value.
+`activate` is the desired activation state — three states (`true`/`false`/
+omitted), a multi-step sequence behind `true`, and drift reconciliation
+against `metadata.river_status`. See [Activation](../guides/activation) for
+the full behavior.
 
 ## Logic data flows
 

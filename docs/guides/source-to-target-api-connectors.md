@@ -1,6 +1,6 @@
 ---
 page_title: "Source-to-target: API connectors"
-subcategory: "Data flows"
+subcategory: "Data flow types"
 description: |-
   The properties_json shape for a source-to-target data flow whose source is a
   SaaS/API connector: run_type regular vs predefined_report, when schemas is
@@ -113,8 +113,8 @@ target = {
 }
 ```
 
-With `loading_method = "merge"`, also set `merge_method`. Snowflake accepts `switch_tables`,
-`delete_insert`, `merge`; the other database targets add `insert_on_conflict`.
+`loading_method` (`overwrite`/`append`/`merge`) and, for `merge`, `merge_method` are covered in full
+in [Loading Methods](./loading-methods.md).
 
 The full set of `name` values, and the required fields of each arm, is in
 [Source-to-target: databases](../guides/source-to-target-databases#the-target-union) — the target

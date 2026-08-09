@@ -1,6 +1,6 @@
 ---
 page_title: "API connector Source Settings"
-subcategory: "Data flows"
+subcategory: "Data flow types"
 description: |-
   How to supply an API connector's required Source Settings in a data flow's
   properties_json, and how to discover which settings are mandatory for a given

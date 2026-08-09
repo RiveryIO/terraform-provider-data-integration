@@ -1,6 +1,6 @@
 ---
 page_title: "Incremental extraction"
-subcategory: "Data flows"
+subcategory: "Extract methods"
 description: |-
   The per-table extract_method contract for source-to-target data flows: the
   incremental vs increment spelling trap, the incremental_field plus
