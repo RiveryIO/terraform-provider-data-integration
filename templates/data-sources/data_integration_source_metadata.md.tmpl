@@ -1,0 +1,36 @@
+---
+page_title: "Discover a source's schema ({{.Name}})"
+subcategory: "Metadata & schema"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# Discover a source's schema
+
+Reads the tables and columns of a live RDBMS source connection, so a data flow's schema mapping
+comes from the real source instead of being hand-written and left to drift.
+
+## How it works
+
+`{{.Name}}` drives the same discovery the console's mapping tab uses: the platform opens a connection
+to the source, introspects the requested schema (and, if you name them, specific tables), and returns
+the columns.
+
+- `schemas_json` — a ready-to-use `properties.schemas[]` block. Decode it with `jsondecode()` straight
+  into a data flow's `properties_json` — see the example below.
+- `schemas` — the same discovery exposed as typed nested objects, for inspecting the result instead of
+  decoding raw JSON.
+
+RDBMS sources only today (MySQL, PostgreSQL, SQL Server, Oracle, …) — there is no equivalent
+discovery path yet for SaaS/API connectors.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_source_metadata/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Metadata & schema](../guides/metadata-and-schema#discovering-an-rdbms-sources-schema) — the full
+  decode pattern and how this relates to `modified_columns`.

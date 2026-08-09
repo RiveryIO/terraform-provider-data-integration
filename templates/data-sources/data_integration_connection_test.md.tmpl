@@ -1,0 +1,32 @@
+---
+page_title: "Test a connection ({{.Name}})"
+subcategory: "Connections"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# Test a connection
+
+Checks whether a connection can actually reach its source or target and authenticate — the same
+check the console's **Test Connection** button runs.
+
+## How it works
+
+`{{.Name}}` opens a real connection using the credentials already stored on a
+[`boomi_data_integration_connection`](../resources/data_integration_connection), and reads back its
+metadata (tables, schemas, or the equivalent for that connector).
+
+A connection that can't be reached does **not** fail the read: `success` comes back `false` and
+`error_message` carries the real connector error (for example, an Oracle `ORA-*` code). If you want a
+broken connection to fail the plan instead of quietly reporting `false`, assert on `success` yourself
+with a `postcondition` — see the example below.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_connection_test/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Connections](../guides/connections) — setting up the connection this tests.

@@ -1,0 +1,33 @@
+---
+page_title: "Discover a target's containers ({{.Name}})"
+subcategory: "Metadata & schema"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# Discover a target's containers
+
+Lists the top-level containers a target warehouse connection can see — Snowflake databases, BigQuery
+datasets, Databricks catalogs — so a data flow's destination is picked from the real warehouse
+instead of typed in blind.
+
+## How it works
+
+`{{.Name}}` drives the same discovery the console's target picker uses: the platform opens a
+connection to the warehouse and lists its containers.
+
+- `names` — the flat list of names (databases, datasets, or catalogs, depending on `target_type`).
+  Covers the common case directly.
+- `result_json` — the raw operation result, passed through unmodified. Decode it with `jsondecode()`
+  for warehouses that return an array of objects instead of a flat list.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_target_metadata/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Metadata & schema](../guides/metadata-and-schema#discovering-a-targets-containers) — how the
+  discovered names map onto a data flow's `target` block.
