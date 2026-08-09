@@ -1,0 +1,16 @@
+environment_id = "YOUR_ENVIRONMENT_ID"
+
+# Jira
+jira_base_url  = "https://yourorg.atlassian.net"
+jira_username  = "you@example.com"
+jira_api_token = "YOUR_ATLASSIAN_API_TOKEN"
+
+# Snowflake
+snowflake_account   = "xy12345.us-east-1"
+snowflake_username  = "SVC_TERRAFORM"
+snowflake_password  = "YOUR_SNOWFLAKE_PASSWORD"
+snowflake_warehouse = "COMPUTE_WH"
+snowflake_database  = "ANALYTICS"
+snowflake_schema    = "PUBLIC"
+
+activate = false
