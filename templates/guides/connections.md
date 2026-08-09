@@ -1,5 +1,5 @@
 ---
-page_title: "Connections - boomi Provider"
+page_title: "Connections"
 subcategory: "Connections"
 description: |-
   Connection types, discovering the right properties, keyfile uploads, and file-zone linking.

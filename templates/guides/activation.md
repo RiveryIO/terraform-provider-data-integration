@@ -1,5 +1,5 @@
 ---
-page_title: "Activation - boomi Provider"
+page_title: "Activation"
 subcategory: "Activation"
 description: |-
   How activate manages a data flow's running state, and how drift is reconciled.
@@ -32,7 +32,7 @@ CDC flows have one extra step in between: the provider validates that the
 source can stream changes and starts the change-data-capture process, which
 has to happen after `update` but before the final `activate` call — this is
 why a CDC flow takes noticeably longer to activate than others. See
-[CDC Data Flows](./cdc-data-flows.md) for the full CDC-specific sequence and
+[CDC data flows](./cdc-data-flows.md) for the full CDC-specific sequence and
 scheduler requirements that go alongside it.
 
 ## Drift and the read-only `status`

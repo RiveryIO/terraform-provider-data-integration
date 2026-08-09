@@ -1,17 +1,17 @@
 ---
-page_title: "Source-to-target: API connectors"
+page_title: "API connector data flows"
 subcategory: "Data flow types"
 description: |-
-  The properties_json shape for a source-to-target data flow whose source is a
-  SaaS/API connector: run_type regular vs predefined_report, when schemas is
-  present, and why source.additional_settings is free-form.
+  The properties_json shape for a data flow whose source is a SaaS/API
+  connector: run_type regular vs predefined_report, when schemas is present,
+  and why source.additional_settings is free-form.
 ---
 
-# Source-to-target: API connectors
+# API connector data flows
 
-A **source-to-target** data flow extracts from one source and loads into one target. This guide
+A data flow extracts from one source and loads into one target. This guide
 covers the case where the source is a SaaS or API connector (Jira, Shopify, Salesforce, …). For
-RDBMS sources see [Source-to-target: databases](../guides/source-to-target-databases).
+RDBMS sources see [Database data flows](../guides/database-data-flows).
 
 `properties_json` is passed to the API verbatim, so **nothing in this provider validates the shape
 below**. This guide is the contract.
@@ -53,7 +53,7 @@ Only `name` is required by the API. The fields that matter in practice:
 | `additional_settings` | Connector-specific. Defaults to `{}`. |
 
 Some connectors additionally require a shared block of mandatory Source Settings before any report
-will run — see [API connector Source Settings](../guides/api-connectors).
+will run — see [Required settings for API connectors](../guides/api-connectors).
 
 ### `run_type`: `regular` vs `predefined_report`
 
@@ -114,11 +114,9 @@ target = {
 ```
 
 `loading_method` (`overwrite`/`append`/`merge`) and, for `merge`, `merge_method` are covered in full
-in [Loading Methods](./loading-methods.md).
-
-The full set of `name` values, and the required fields of each arm, is in
-[Source-to-target: databases](../guides/source-to-target-databases#the-target-union) — the target
-union is identical regardless of source type.
+in [Loading methods](./loading-methods.md). The full set of `name` values and the required fields of
+each arm — identical regardless of source type — is documented once, in
+[Loading methods](./loading-methods.md#the-target-union).
 
 ## When `schemas` is present
 

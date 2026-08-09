@@ -1,11 +1,11 @@
 ---
-page_title: "Metadata & Schema - boomi Provider"
+page_title: "Metadata & schema"
 subcategory: "Metadata & schema"
 description: |-
   Column selection, renaming, and retyping, and how to discover a source's schema instead of hand-writing it.
 ---
 
-# Metadata & Schema
+# Metadata & schema
 
 Two related things live here: how to describe which columns a data flow moves
 (and how they're renamed/retyped), and how to discover that shape from the
@@ -78,7 +78,7 @@ data "boomi_data_integration_source_metadata" "customers_db" {
 
 Decode its `schemas_json` output straight into the data flow's
 `properties_json.schemas` instead of writing the table/column list by hand —
-see [Incremental Extraction](./incremental-extraction.md#let-the-data-source-write-it-for-you)
+see [Incremental extraction](./incremental-extraction.md#let-the-data-source-write-it-for-you)
 for the full decode pattern. Only RDBMS sources are supported today; there is
 no equivalent discovery path yet for SaaS/API connectors.
 
@@ -99,5 +99,5 @@ data "boomi_data_integration_target_metadata" "snowflake_dbs" {
 
 The discovered names come back as a flat list — check them against the
 `target` union's field table in
-[Source-to-Target: Databases](./source-to-target-databases.md#the-target-union)
+[Loading methods](./loading-methods.md#the-target-union)
 before writing the actual `target` block.

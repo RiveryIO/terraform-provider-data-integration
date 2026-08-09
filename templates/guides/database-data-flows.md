@@ -1,18 +1,18 @@
 ---
-page_title: "Source-to-target: databases"
+page_title: "Database data flows"
 subcategory: "Data flow types"
 description: |-
-  The properties_json shape for a source-to-target data flow whose source is a
-  database: run_type multi_tables, the per-table details contract, the target
-  union, and why modified_columns is a delta rather than a column list.
+  The properties_json shape for a data flow whose source is a database:
+  run_type multi_tables, the per-table details contract, and why
+  modified_columns is a delta rather than a column list.
 ---
 
-# Source-to-target: databases
+# Database data flows
 
-A source-to-target data flow with an RDBMS source (MySQL, PostgreSQL, SQL Server, Oracle, BigQuery,
+A data flow with an RDBMS source (MySQL, PostgreSQL, SQL Server, Oracle, BigQuery,
 Snowflake, …) replicates one or more **tables** per run. That is what distinguishes it from the
-single-report API-connector shape in
-[Source-to-target: API connectors](../guides/source-to-target-api-connectors).
+single-report shape in
+[API connector data flows](../guides/api-connector-data-flows).
 
 `properties_json` is passed to the API verbatim, so **nothing in this provider validates the shape
 below**. This guide is the contract.
@@ -109,33 +109,10 @@ is selected by default, and this field records only the departures (drop,
 rename, retype, mark as key). Listing only the columns you *want* is the
 common mistake: omitted columns stay selected, so you get them anyway. Full
 field table, the discovery data source, and the exact contract live in
-[Metadata & Schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
+[Metadata & schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
 
-## The `target` union
+## The `target` block
 
-`target` is discriminated on `name`. Each arm declares `loading_method` as its only required field;
-everything else is optional in the schema even though a working flow needs the connection and the
-destination container.
-
-| `name` | Destination |
-| --- | --- |
-| `snowflake` | Snowflake — `database_name`, `schema_name` |
-| `bigquery` | BigQuery — `dataset_id`, plus `sql_dialect`, `auto_detect_datatype_changes` |
-| `redshift` | Redshift |
-| `databricks` | Databricks |
-| `azure_synapse_analytics` | Azure Synapse Analytics |
-| `azure_sql` | Azure SQL |
-| `postgres_rds` | PostgreSQL |
-| `athena` | Athena |
-| `s3` | S3 files |
-| `gcs` | Google Cloud Storage files |
-| `blob_storage` | Azure Blob Storage files |
-| `target_email` | Email delivery |
-
-Fields shared by the warehouse arms: `connection_id`, `loading_method`, `merge_method`, `table_name`,
-`target_prefix`, `single_table_settings`, `file_zone_settings`, `file_path_destination`,
-`is_ordered_merge_key`, `order_expression`, `additional_settings`.
-
-`loading_method` (`overwrite`/`append`/`merge`) and `merge_method` are covered in full — including
-which `merge_method` values each target family accepts — in
-[Loading Methods](./loading-methods.md).
+`target` is discriminated on `name` — which destination you're writing to — and is the same union
+regardless of source type, so it's documented once, in
+[Loading methods](./loading-methods.md#the-target-union), rather than repeated per source guide.
