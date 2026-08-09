@@ -1,14 +1,3 @@
-terraform {
-  required_providers {
-    boomi = {
-      source  = "riveryio/data-integration"
-      version = "~> 1.0"
-    }
-  }
-}
-
-provider "boomi" {}
-
 resource "boomi_data_integration_connection" "snowflake" {
   name = "Snowflake"
   type = "snowflake"

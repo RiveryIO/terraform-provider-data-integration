@@ -12,20 +12,6 @@
 #   "stream_only"          — starts from the current binlog position immediately.
 #                            Use when the target is already populated.
 
-terraform {
-  required_providers {
-    boomi = {
-      source  = "riveryio/data-integration"
-      version = "~> 1.0"
-    }
-  }
-}
-
-# Credentials from environment variables:
-#   DATA_INTEGRATION_API_TOKEN, DATA_INTEGRATION_ACCOUNT_ID,
-#   DATA_INTEGRATION_API_URL, DATA_INTEGRATION_ENVIRONMENT_ID
-provider "boomi" {}
-
 # ── Connections ───────────────────────────────────────────────────────────────
 
 resource "boomi_data_integration_connection" "mysql_cdc" {

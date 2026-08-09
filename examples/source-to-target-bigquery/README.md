@@ -19,11 +19,11 @@ file**, so a data flow using a provider-created BigQuery connection:
   project, so the platform's dataset validation fails — and therefore
 - **cannot run** (`POST /run` → `400 "Data Flow ... is disabled"`).
 
-This was verified end-to-end on integration (two datasets tried, both failed
-activation on the keyless connection). To actually run it, finish the connection
-out-of-band — upload the service-account key in the console — then re-activate.
-It's a provider gap for **file-backed connection types** (gcloud / SSH keys),
-tracked under CORE-2346.
+This was verified end-to-end against a live account (two datasets tried, both
+failed activation on the keyless connection). To actually run it, finish the
+connection out-of-band — upload the service-account key in the console — then
+re-activate. It's a provider gap for **file-backed connection types**
+(gcloud / SSH keys).
 
 ## Secrets
 
@@ -34,12 +34,10 @@ secrets. Never commit `terraform.tfvars` or `*.tfstate`.
 
 ## Run it
 
-```bash
-export DATA_INTEGRATION_API_URL=https://api.integration.rivery.in
-export DATA_INTEGRATION_ACCOUNT_ID=<account_id>
-export DATA_INTEGRATION_ENVIRONMENT_ID=<existing_env_id>
-export DATA_INTEGRATION_API_TOKEN=<token>
+Set `DATA_INTEGRATION_API_TOKEN` / `DATA_INTEGRATION_ACCOUNT_ID` (see the
+[Authentication](../../docs/guides/authentication.md) guide), then:
 
+```bash
 cp terraform.tfvars.example terraform.tfvars   # then edit
 terraform apply   # creates the connection + data flow (data flow starts disabled)
 # Upload the SA key on the connection in the console, then activate + run.

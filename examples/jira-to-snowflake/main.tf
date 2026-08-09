@@ -10,20 +10,6 @@
 #     today, week_to_date, last_week, month_to_date, last_month, last_7_days,
 #     last_30_days, last_90_days, last_180_days, last_365_days, all_time.
 
-terraform {
-  required_providers {
-    boomi = {
-      source  = "riveryio/data-integration"
-      version = "~> 1.0"
-    }
-  }
-}
-
-# Credentials from environment variables:
-#   DATA_INTEGRATION_API_TOKEN, DATA_INTEGRATION_ACCOUNT_ID,
-#   DATA_INTEGRATION_API_URL, DATA_INTEGRATION_ENVIRONMENT_ID
-provider "boomi" {}
-
 # ── Connections ───────────────────────────────────────────────────────────────
 
 resource "boomi_data_integration_connection" "jira" {

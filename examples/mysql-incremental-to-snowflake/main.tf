@@ -21,25 +21,6 @@
 # See README.md for the "incremental" vs "increment" trap, the loading_method
 # reasoning, and what is and is not verified.
 
-terraform {
-  # v1.1.0 is the FIRST release whose source_metadata data source accepts
-  # extract_method / incremental_field / date_range. Earlier versions hardcoded
-  # extract_method "all", so route 1 could only ever produce a full reload.
-  required_providers {
-    boomi = {
-      source  = "riveryio/data-integration"
-      version = ">= 1.1.0"
-    }
-  }
-}
-
-provider "boomi" {
-  api_url        = var.api_url
-  token          = var.api_token
-  account_id     = var.account_id
-  environment_id = var.environment_id
-}
-
 # ── Source connection: MySQL ──────────────────────────────────────────────────
 # Credentials come from variables only (see variables.tf — password is marked
 # sensitive). parameters_json is write-only: never stored in state, and the API

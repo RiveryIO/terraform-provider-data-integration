@@ -1,22 +1,3 @@
-# ── Provider / API ──────────────────────────────────────────────────────────
-variable "api_url" {
-  type        = string
-  description = "Base URL of the Data Integration API. Devbox = http://localhost:8008 ; Integration = https://api.integration.rivery.in"
-}
-
-variable "api_token" {
-  type        = string
-  description = "Data Integration API token. Prefer the DATA_INTEGRATION_API_TOKEN env var over hardcoding."
-  sensitive   = true
-  default     = null
-}
-
-variable "account_id" {
-  type        = string
-  description = "Data Integration account ID (or set DATA_INTEGRATION_ACCOUNT_ID)."
-  default     = null
-}
-
 variable "environment_id" {
   type        = string
   description = "An EXISTING environment ID. This example does not create an environment."
@@ -41,10 +22,10 @@ variable "sub_data_flow_id" {
 }
 
 # ── Python (logicode) step — optional ──────────────────────────────────────────
-variable "python_file_id" {
-  type        = string
-  description = "file_id of an uploaded code file for the Python (logicode) step. Empty = omit the Python step (the API cannot upload code via Terraform)."
-  default     = ""
+variable "include_python_step" {
+  type        = bool
+  description = "Create and wire in the Python (logicode) step. false = 2-step pipeline without it."
+  default     = true
 }
 
 variable "python_size" {

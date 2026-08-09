@@ -1,30 +1,12 @@
-terraform {
-  required_providers {
-    boomi = {
-      source = "riveryio/data-integration"
-    }
-  }
-}
-
-# Credentials come from DATA_INTEGRATION_API_TOKEN / _ACCOUNT_ID / _API_URL,
-# or set them inline (token is sensitive — prefer the environment).
-provider "boomi" {
-  # api_url        = "http://localhost:8008"          # devbox api-service
-  # environment_id = var.environment_id
-}
-
 # A source-to-target data flow (the API calls this a "river") moves tables from
 # a source connection into a target connection. Unlike a logic data flow (see
 # ../main.tf), its type is "source_to_target" and its properties describe a
 # source, a target, and the schemas/tables to move. The provider passes
 # properties_json through to the API verbatim, so this file emits the API body
 # shape directly.
-#
-# Verified end-to-end on a devbox (MySQL gold DB -> PostgreSQL): 75 rows across
-# four tables.
 
 # --- Source connection (MySQL) ---
-resource "boomi_connection" "source" {
+resource "boomi_data_integration_connection" "source" {
   environment_id = var.environment_id
   name           = "example-mysql-source"
   type           = "mysql"
@@ -42,7 +24,7 @@ resource "boomi_connection" "source" {
 # --- Target connection (PostgreSQL) ---
 # The Postgres target stages the load through S3 (bulk COPY), so the connection
 # also carries S3 credentials. Without them the connection test fails.
-resource "boomi_connection" "target" {
+resource "boomi_data_integration_connection" "target" {
   environment_id = var.environment_id
   name           = "example-postgres-target"
   type           = "postgres"
@@ -63,7 +45,7 @@ resource "boomi_connection" "target" {
 
 # --- The source-to-target data flow ---
 # NB: the API's Postgres target name is "postgres_rds", not "postgres".
-resource "boomi_data_flow" "mysql_to_postgres" {
+resource "boomi_data_integration_data_flow" "mysql_to_postgres" {
   environment_id = var.environment_id
   name           = "example-mysql-to-postgres"
   type           = "source_to_target"
@@ -96,11 +78,11 @@ resource "boomi_data_flow" "mysql_to_postgres" {
     source = {
       name          = "mysql"
       run_type      = "multi_tables"
-      connection_id = boomi_connection.source.id
+      connection_id = boomi_data_integration_connection.source.id
     }
     target = {
       name           = "postgres_rds"
-      connection_id  = boomi_connection.target.id
+      connection_id  = boomi_data_integration_connection.target.id
       loading_method = "overwrite"
       database_name  = var.postgres_database
       schema_name    = "public"
@@ -121,12 +103,10 @@ variable "environment_id" {
 }
 
 variable "mysql_host" {
-  type    = string
-  default = "dx-mysql"
+  type = string
 }
 variable "mysql_username" {
-  type    = string
-  default = "rivery"
+  type = string
 }
 variable "mysql_password" {
   type      = string
@@ -134,17 +114,14 @@ variable "mysql_password" {
   default   = ""
 }
 variable "mysql_database" {
-  type    = string
-  default = "rivery_dev"
+  type = string
 }
 
 variable "postgres_host" {
-  type    = string
-  default = "dx-postgres"
+  type = string
 }
 variable "postgres_username" {
-  type    = string
-  default = "rivery"
+  type = string
 }
 variable "postgres_password" {
   type      = string
@@ -152,8 +129,7 @@ variable "postgres_password" {
   default   = ""
 }
 variable "postgres_database" {
-  type    = string
-  default = "rivery_dev"
+  type = string
 }
 
 variable "s3_bucket" {
@@ -176,5 +152,5 @@ variable "s3_region" {
 }
 
 output "data_flow_id" {
-  value = boomi_data_flow.mysql_to_postgres.id
+  value = boomi_data_integration_data_flow.mysql_to_postgres.id
 }

@@ -10,18 +10,6 @@
 # This example is kept only to document the existing resource for configurations
 # that still use it.
 
-terraform {
-  required_providers {
-    boomi = {
-      source = "riveryio/data-integration"
-    }
-  }
-}
-
-provider "boomi" {
-  # api_url / token / account_id / environment_id from DATA_INTEGRATION_* env vars
-}
-
 # Run an existing data flow through Terraform. This models the API's
 # imperative activate_river + run actions as a resource (Terraform provider
 # Actions require Terraform >= 1.14, so a resource is the portable form).

@@ -1,21 +1,15 @@
-# Copy to terraform.tfvars and fill in. Prefer the DATA_INTEGRATION_* env vars
-# for the provider credentials (api_url / api_token / account_id / environment_id).
+# Copy to terraform.tfvars and fill in.
 
-api_url        = "http://localhost:8008"
-account_id     = "<account_id>"
 environment_id = "<existing_environment_id>"
 group_id       = "<env_group_cross_id>" # required for the Snowflake step to route
-# api_token    = "<token>"              # better: export DATA_INTEGRATION_API_TOKEN
 
 data_flow_name   = "TF_logic_multistep"
 sub_data_flow_id = "<cross_id of an existing data flow to run as step 1>"
 
-# Python (logicode) step — OPTIONAL. Leave python_file_id empty to omit it; the
-# API cannot upload code via Terraform, so this must reference an existing file.
-python_file_id = ""
-# python_file_id = "<uploaded_code_file_id>"
-# python_size    = "XS"
-# python_packages = ["pandas"]
+# Python (logicode) step — included by default (include_python_step = true).
+# include_python_step = false
+# python_size          = "XS"
+# python_packages      = ["pandas"]
 
 # Snowflake SQL / DB transformation step
 sf_account_name    = "<account>.<region>"

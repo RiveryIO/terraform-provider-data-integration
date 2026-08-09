@@ -27,11 +27,8 @@ config emits the exact step shapes the API accepts:
 }
 ```
 
-## Two run-time prerequisites
+## One run-time prerequisite
 
-- **Python step needs an uploaded `file_id`.** The API cannot create code via
-  Terraform. Leave `python_file_id = ""` (default) to omit the Python step; set
-  it to a real `file_id` (from the UI code editor or another data flow) to include it.
 - **Snowflake step needs `group_id`.** A logic data flow that uses a shared warehouse
   connection must set `group_id` to the environment's group cross_id, or the
   connection fails to route at run time with a misleading 404. This example sets
@@ -39,22 +36,18 @@ config emits the exact step shapes the API accepts:
 
 ## Run it
 
-```bash
-export DATA_INTEGRATION_API_URL=http://localhost:8008
-export DATA_INTEGRATION_ACCOUNT_ID=<account_id>
-export DATA_INTEGRATION_ENVIRONMENT_ID=<existing_env_id>
-export DATA_INTEGRATION_API_TOKEN=<token>
+Set `DATA_INTEGRATION_API_TOKEN` / `DATA_INTEGRATION_ACCOUNT_ID` (see the
+[Authentication](../../docs/guides/authentication.md) guide), then:
 
+```bash
 terraform apply \
-  -var "api_url=$DATA_INTEGRATION_API_URL" \
-  -var "account_id=$DATA_INTEGRATION_ACCOUNT_ID" \
-  -var "environment_id=$DATA_INTEGRATION_ENVIRONMENT_ID" \
+  -var "environment_id=<existing_env_id>" \
   -var "group_id=<env_group_cross_id>" \
   -var "sub_data_flow_id=<cross_id of a data flow to orchestrate>" \
   -var "sf_account_name=<snowflake_account>" \
   -var "sf_username=<user>" -var "sf_password=<pass>" \
   -var "sf_target_database=<db>"
-  # add -var "python_file_id=<file_id>" to include the Python step
+  # add -var "include_python_step=false" to omit the Python step
 ```
 
 Terraform creates the data flow **disabled**; activate + run it through the API

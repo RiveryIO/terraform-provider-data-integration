@@ -1,9 +1,6 @@
-# Copy to terraform.tfvars (git-ignored) and fill in. Prefer the
-# DATA_INTEGRATION_* env vars for the provider credentials, and NEVER commit the
-# two passwords below.
+# Copy to terraform.tfvars (git-ignored) and fill in. NEVER commit the two
+# passwords below.
 
-api_url        = "https://api.integration.rivery.in"
-account_id     = "<account_id>"
 environment_id = "<existing_environment_id>"
 group_id       = "<env_group_cross_id>"
 # api_token    = "<token>"   # better: export DATA_INTEGRATION_API_TOKEN

@@ -1,17 +1,6 @@
 # Minimal data flow: Jira Issues → Snowflake (full load).
 # Shows the required structure of properties_json for a source_to_target flow.
 
-terraform {
-  required_providers {
-    boomi = {
-      source  = "riveryio/data-integration"
-      version = "~> 1.0"
-    }
-  }
-}
-
-provider "boomi" {}
-
 resource "boomi_data_integration_connection" "jira" {
   name = "Jira"
   type = "jira"
