@@ -3,12 +3,12 @@
 page_title: "boomi Provider"
 subcategory: ""
 description: |-
-  Manage Boomi Data Integration resources as code. Authenticates with a Data Integration API token scoped to an account.
+  Manage Boomi Data Integration resources as code. Authenticates with either a Data Integration API token, or Boomi Platform credentials exchanged for a JWT, scoped to an account.
 ---
 
 # boomi Provider
 
-Manage Boomi Data Integration resources as code. Authenticates with a Data Integration API token scoped to an account.
+Manage Boomi Data Integration resources as code. Authenticates with either a Data Integration API token, or Boomi Platform credentials exchanged for a JWT, scoped to an account.
 
 
 
@@ -17,7 +17,11 @@ Manage Boomi Data Integration resources as code. Authenticates with a Data Integ
 
 ### Optional
 
-- `account_id` (String) Data Integration account ID. May also be set via the DATA_INTEGRATION_ACCOUNT_ID environment variable.
+- `account_id` (String) Data Integration account ID. May also be set via the DATA_INTEGRATION_ACCOUNT_ID environment variable. Required in every auth mode — the API's account-scoped URLs need it regardless of how identity is authenticated.
 - `api_url` (String) Base URL of the Data Integration API. May also be set via the DATA_INTEGRATION_API_URL environment variable. Defaults to https://api.rivery.io.
+- `boomi_account_id` (String) Boomi Platform account ID used in the JWT exchange URL. This is distinct from account_id above (the Data Integration account) — the JWT resolves identity, not the API's account-scoped URLs. May also be set via the DATA_INTEGRATION_BOOMI_ACCOUNT_ID environment variable.
+- `boomi_api_token` (String, Sensitive) Boomi Platform long-lived API token, exchanged for a short-lived JWT that authenticates every request. May also be set via the DATA_INTEGRATION_BOOMI_API_TOKEN environment variable.
+- `boomi_platform_url` (String) Boomi Platform base URL used to exchange Boomi credentials for a JWT. May also be set via the DATA_INTEGRATION_BOOMI_PLATFORM_URL environment variable. Defaults to https://api.boomi.com.
+- `boomi_username` (String) Boomi Platform username. May also be set via the DATA_INTEGRATION_BOOMI_USERNAME environment variable.
 - `environment_id` (String) Default environment ID for environment-scoped resources that do not set their own environment_id. May also be set via the DATA_INTEGRATION_ENVIRONMENT_ID environment variable.
-- `token` (String, Sensitive) Data Integration API token (bearer). May also be set via the DATA_INTEGRATION_API_TOKEN environment variable.
+- `token` (String, Sensitive) Data Integration API token (bearer). May also be set via the DATA_INTEGRATION_API_TOKEN environment variable. Mutually exclusive with the boomi_* attributes below — set exactly one auth mode.
