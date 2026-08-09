@@ -165,18 +165,18 @@ func (s *BoomiJWTSource) exchange(ctx context.Context) (string, error) {
 
 		resp, err := s.cfg.HTTPClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("Boomi token exchange request error: %w", err)
+			lastErr = fmt.Errorf("boomi token exchange request error: %w", err)
 			continue // transport error — retry
 		}
 
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		switch {
 		case resp.StatusCode >= 200 && resp.StatusCode < 300:
 			jwt := strings.TrimSpace(string(body))
 			if jwt == "" {
-				return "", errors.New("Boomi token exchange returned an empty JWT")
+				return "", errors.New("boomi token exchange returned an empty JWT")
 			}
 			s.cached = jwt
 			return jwt, nil

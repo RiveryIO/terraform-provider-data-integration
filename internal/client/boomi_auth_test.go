@@ -42,7 +42,7 @@ func TestBoomiJWTSource_Exchange(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotAccept = r.Header.Get("Accept")
-		w.Write([]byte("  jwt-1  \n")) // exercise TrimSpace
+		_, _ = w.Write([]byte("  jwt-1  \n")) // exercise TrimSpace
 	}))
 	defer srv.Close()
 
@@ -70,7 +70,7 @@ func TestBoomiJWTSource_CacheHit(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Write([]byte("jwt-cached"))
+		_, _ = w.Write([]byte("jwt-cached"))
 	}))
 	defer srv.Close()
 
@@ -93,7 +93,7 @@ func TestBoomiJWTSource_Refresh_ExchangesWhenStaleMatchesCache(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
-		w.Write([]byte("jwt-" + string(rune('0'+n))))
+		_, _ = w.Write([]byte("jwt-" + string(rune('0'+n))))
 	}))
 	defer srv.Close()
 
@@ -120,7 +120,7 @@ func TestBoomiJWTSource_Refresh_SkipsExchangeIfAlreadySuperseded(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Write([]byte("jwt-current"))
+		_, _ = w.Write([]byte("jwt-current"))
 	}))
 	defer srv.Close()
 
@@ -159,7 +159,7 @@ func TestBoomiJWTSource_Refresh_ConcurrentCallersCollapseToOneExchange(t *testin
 			// on the lock before #1 completes and updates the cache.
 			<-release
 		}
-		w.Write([]byte("jwt-" + string(rune('0'+n))))
+		_, _ = w.Write([]byte("jwt-" + string(rune('0'+n))))
 	}))
 	defer srv.Close()
 
@@ -202,7 +202,7 @@ func TestBoomiJWTSource_RetriesOn429And5xxThenSucceeds(t *testing.T) {
 		case 2:
 			w.WriteHeader(http.StatusServiceUnavailable)
 		default:
-			w.Write([]byte("jwt-ok"))
+			_, _ = w.Write([]byte("jwt-ok"))
 		}
 	}))
 	defer srv.Close()
@@ -242,7 +242,7 @@ func TestClient_RefreshesOnceOn401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		if r.Header.Get("Authorization") == "Bearer fresh" {
-			w.Write([]byte(`{"_id":"e1","name":"prod"}`))
+			_, _ = w.Write([]byte(`{"_id":"e1","name":"prod"}`))
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
