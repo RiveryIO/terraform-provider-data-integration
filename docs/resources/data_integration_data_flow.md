@@ -103,7 +103,7 @@ resource "boomi_data_integration_data_flow" "mysql_to_snowflake" {
 
 ### Optional
 
-- `activate` (Boolean) Desired activation state of the data flow. true activates it (the provider runs the disable → update → enable_cdc → activate sequence the API requires), false disables it, and omitting it leaves activation unmanaged — there is deliberately no default. Reconciled on refresh against the API's metadata.river_status, so out-of-band activation shows up as drift; see "Activation" below.
+- `activate` (Boolean) Desired activation state of the data flow. true activates it — disabling it first if it's currently active, updating it, then (for CDC flows only) validating the source and starting the change-data-capture streaming process, before the final activation call — false disables it, and omitting it leaves activation unmanaged — there is deliberately no default. Reconciled on refresh against the API's metadata.river_status, so out-of-band activation shows up as drift; see "Activation" below.
 - `description` (String) Description. Stored under the API's metadata.description (a top-level description is rejected).
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.

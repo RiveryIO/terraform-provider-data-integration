@@ -98,10 +98,12 @@ Exactly one scheduler is allowed per CDC flow.
 
 ## Activation
 
-`activate = true` triggers CDC's extra `enable_cdc` step alongside the usual
-activation sequence. See [Activation](./activation.md) for the full
-three-state behavior and drift reconciliation, shared by every data flow
-type.
+`activate = true` triggers an extra step for CDC flows: the provider
+validates that the source can stream changes and starts the
+change-data-capture process before the final activation call — this is why
+CDC flows take longer to activate than others. See
+[Activation](./activation.md) for the full three-state behavior and drift
+reconciliation, shared by every data flow type.
 
 ## Seeding or resetting the source offset
 

@@ -236,12 +236,13 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"activate": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Desired activation state of the data flow. true activates it (the " +
-					"provider runs the disable → update → enable_cdc → activate sequence the API " +
-					"requires), false disables it, and omitting it leaves activation unmanaged — " +
-					"there is deliberately no default. Reconciled on refresh against the API's " +
-					"metadata.river_status, so out-of-band activation shows up as drift; see " +
-					"\"Activation\" below.",
+				Description: "Desired activation state of the data flow. true activates it — " +
+					"disabling it first if it's currently active, updating it, then (for CDC flows " +
+					"only) validating the source and starting the change-data-capture streaming " +
+					"process, before the final activation call — false disables it, and omitting " +
+					"it leaves activation unmanaged — there is deliberately no default. Reconciled " +
+					"on refresh against the API's metadata.river_status, so out-of-band activation " +
+					"shows up as drift; see \"Activation\" below.",
 			},
 			"status": schema.StringAttribute{
 				Computed: true,

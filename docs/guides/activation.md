@@ -15,7 +15,7 @@ not a single API call.
 
 | `activate` | Behaviour |
 | --- | --- |
-| `true` | The provider enables the flow: `disable` (only if currently active) → `update` → `enable_cdc` (CDC flows only) → `activate`. |
+| `true` | The provider enables the flow: `disable` (only if currently active) → `update` → validate the source and start CDC streaming (CDC flows only) → `activate`. |
 | `false` | The provider disables the flow if it is currently active. |
 | omitted | Activation is **not managed**. There is deliberately no default: the provider adopts whatever the server reports (a newly created data flow is disabled) and never activates or disables the flow on later applies. |
 
@@ -28,8 +28,10 @@ activate call will accept it, and skipping that update fails activation with
 update itself, so you never have to sequence it yourself; this only matters
 if you're calling the API directly outside Terraform.
 
-CDC flows have one extra step: `enable_cdc` sets `ENABLE_LOG` on the flow,
-and has to happen after `update` but before the final `activate` call. See
+CDC flows have one extra step in between: the provider validates that the
+source can stream changes and starts the change-data-capture process, which
+has to happen after `update` but before the final `activate` call — this is
+why a CDC flow takes noticeably longer to activate than others. See
 [CDC Data Flows](./cdc-data-flows.md) for the full CDC-specific sequence and
 scheduler requirements that go alongside it.
 
