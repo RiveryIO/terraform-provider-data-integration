@@ -1,11 +1,11 @@
 ---
-page_title: "Environments & Variables - boomi Provider"
+page_title: "Environments & variables"
 subcategory: "Environments & variables"
 description: |-
   Managing environments, environment variables, dataflow variables, and data flow groups.
 ---
 
-# Environments & Variables
+# Environments & variables
 
 -> **This provider does not manage users or permission groups.** There is no
 `boomi_data_integration_user` or access-control-group resource today. The
@@ -27,7 +27,7 @@ resource "boomi_data_integration_environment" "staging" {
 
 Most other resources in this provider fall back to the provider-level
 `environment_id` when their own `environment_id` attribute is omitted — see
-[Getting Started](./getting-started.md) for setting that default.
+[Getting started](./getting-started.md) for setting that default.
 
 ## Environment variables
 

@@ -1,5 +1,5 @@
 ---
-page_title: "API connector Source Settings"
+page_title: "Required settings for API connectors"
 subcategory: "Data flow types"
 description: |-
   How to supply an API connector's required Source Settings in a data flow's
@@ -7,7 +7,7 @@ description: |-
   connector.
 ---
 
-# API connector Source Settings
+# Required settings for API connectors
 
 Some SaaS sources drive every one of their reports from a shared set of "Source Settings" — the
 fields the console shows under *Source Settings — Connector settings applied to every report*, marked

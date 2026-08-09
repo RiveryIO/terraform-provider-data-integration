@@ -53,7 +53,7 @@ Only `name` is required by the API. The fields that matter in practice:
 | `additional_settings` | Connector-specific. Defaults to `{}`. |
 
 Some connectors additionally require a shared block of mandatory Source Settings before any report
-will run — see [API connector Source Settings](../guides/api-connectors).
+will run — see [Required settings for API connectors](../guides/api-connectors).
 
 ### `run_type`: `regular` vs `predefined_report`
 
@@ -114,9 +114,9 @@ target = {
 ```
 
 `loading_method` (`overwrite`/`append`/`merge`) and, for `merge`, `merge_method` are covered in full
-in [Loading Methods](./loading-methods.md). The full set of `name` values and the required fields of
+in [Loading methods](./loading-methods.md). The full set of `name` values and the required fields of
 each arm — identical regardless of source type — is documented once, in
-[Loading Methods](./loading-methods.md#the-target-union).
+[Loading methods](./loading-methods.md#the-target-union).
 
 ## When `schemas` is present
 

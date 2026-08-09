@@ -111,7 +111,7 @@ resource "boomi_data_integration_data_flow" "posts_to_snowflake" {
 | `source.additional_settings.source_type` | The literal `blueprint`. |
 
 The `target` block is the same union as any other data flow — see
-[Loading Methods](../guides/loading-methods#the-target-union).
+[Loading methods](../guides/loading-methods#the-target-union).
 
 ## Per-step tables and `interface_parameters`
 

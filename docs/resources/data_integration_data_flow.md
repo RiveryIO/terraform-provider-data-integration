@@ -35,7 +35,7 @@ Then the cross-cutting contracts:
   exactly-one-of `date_range`/`running_number`/`epoch` rule, and the `date_range` shape.
 - [CDC data flows](../guides/cdc-data-flows) — the mandatory scheduler and its cron bounds, and how
   activation enables CDC.
-- [API connector Source Settings](../guides/api-connectors) — the mandatory
+- [Required settings for API connectors](../guides/api-connectors) — the mandatory
   `interface_parameters.source[]` Source Settings and how to discover which ones a connector
   requires.
 

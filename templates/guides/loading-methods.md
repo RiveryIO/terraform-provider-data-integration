@@ -1,11 +1,11 @@
 ---
-page_title: "Loading Methods - boomi Provider"
+page_title: "Loading methods"
 subcategory: "Loading methods"
 description: |-
   How a data flow writes to its target — overwrite, append, or merge.
 ---
 
-# Loading Methods
+# Loading methods
 
 Every warehouse-style `target` arm (Snowflake, BigQuery, Redshift, Databricks,
 Azure Synapse/SQL, PostgreSQL, Athena, …) declares exactly one required
@@ -42,7 +42,7 @@ target = {
 Two things have to be true for `merge` to work:
 
 1. **A key column.** Mark it in `modified_columns` with `is_key = true` — see
-   [Metadata & Schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
+   [Metadata & schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
    This is the column the merge matches existing rows on.
 2. **`merge_method`**, naming the actual merge strategy:
 
@@ -71,8 +71,8 @@ one deriving from the other:
 | `incremental` | `merge` (or `append` if duplicates are acceptable/impossible) |
 | `log` (CDC) | `merge` — a changed row needs to update the existing one, not duplicate it |
 
-See [Extract Methods](./incremental-extraction.md) and
-[CDC Data Flows](./cdc-data-flows.md) for the extract side of this pairing.
+See [Incremental extraction](./incremental-extraction.md) and
+[CDC data flows](./cdc-data-flows.md) for the extract side of this pairing.
 
 ## The `target` union
 

@@ -1,10 +1,10 @@
 ---
-page_title: "Getting Started - boomi Provider"
+page_title: "Getting started"
 description: |-
   Step-by-step guide to managing Boomi Data Integration resources with Terraform.
 ---
 
-# Getting Started
+# Getting started
 
 ## What this provider manages
 
@@ -222,13 +222,13 @@ Every runnable example in the repo, organized by topic, is indexed in the
 
 - [Authentication](./authentication.md) — both auth modes, every parameter, and how the right one gets chosen
 - [Connections](./connections.md) — finding the right properties, keyfile uploads, file-zone linking
-- [Data Flow Types](./data-flow-types.md) — the `run_type` enum and which guide applies
-- [Logic Data Flows](./logic-data-flows.md) — orchestration steps
-- [Incremental Extraction](./incremental-extraction.md) — date-range and running-number modes
-- [CDC Data Flows](./cdc-data-flows.md) — snapshot + streaming CDC
-- [Loading Methods](./loading-methods.md) — overwrite, append, merge
-- [Metadata & Schema](./metadata-and-schema.md) — column selection and schema discovery
+- [Choosing a data flow type](./data-flow-types.md) — the `run_type` enum and which guide applies
+- [Logic data flows](./logic-data-flows.md) — orchestration steps
+- [Incremental extraction](./incremental-extraction.md) — date-range and running-number modes
+- [CDC data flows](./cdc-data-flows.md) — snapshot + streaming CDC
+- [Loading methods](./loading-methods.md) — overwrite, append, merge
+- [Metadata & schema](./metadata-and-schema.md) — column selection and schema discovery
 - [Activation](./activation.md) — how `activate` and drift reconciliation work
-- [Environments & Variables](./environments-and-variables.md) — environments, environment variables, dataflow variables, groups
-- [Blueprint Data Flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
+- [Environments & variables](./environments-and-variables.md) — environments, environment variables, dataflow variables, groups
+- [Blueprint data flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
 - [Examples](./examples.md) — every runnable example in the repo, indexed by topic

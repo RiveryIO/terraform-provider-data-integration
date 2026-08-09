@@ -109,10 +109,10 @@ is selected by default, and this field records only the departures (drop,
 rename, retype, mark as key). Listing only the columns you *want* is the
 common mistake: omitted columns stay selected, so you get them anyway. Full
 field table, the discovery data source, and the exact contract live in
-[Metadata & Schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
+[Metadata & schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
 
 ## The `target` block
 
 `target` is discriminated on `name` — which destination you're writing to — and is the same union
 regardless of source type, so it's documented once, in
-[Loading Methods](./loading-methods.md#the-target-union), rather than repeated per source guide.
+[Loading methods](./loading-methods.md#the-target-union), rather than repeated per source guide.
