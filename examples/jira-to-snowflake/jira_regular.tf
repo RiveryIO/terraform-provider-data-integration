@@ -1,7 +1,3 @@
-# Jira Issues → Snowflake (regular run).
-# Syncs the "issue" report into a single table on every run.
-# Column schema and extract settings are pre-configured in the module.
-
 module "jira_regular" {
   source = "./modules/jira-to-snowflake"
 

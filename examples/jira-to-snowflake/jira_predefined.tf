@@ -1,7 +1,3 @@
-# Jira predefined reports → Snowflake.
-# Syncs one or more Jira built-in reports (user, sprint, project, …)
-# into separate tables. Report list and loading settings are pre-configured in the module.
-
 module "jira_predefined" {
   source = "./modules/jira-predefined-report-to-snowflake"
 
