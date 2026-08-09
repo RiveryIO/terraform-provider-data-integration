@@ -1,6 +1,6 @@
 ---
 page_title: "Source-to-target: databases"
-subcategory: "Data flows"
+subcategory: "Data flow types"
 description: |-
   The properties_json shape for a source-to-target data flow whose source is a
   database: run_type multi_tables, the per-table details contract, the target
@@ -104,55 +104,12 @@ sequence, and an offset resource): see [CDC data flows](../guides/cdc-data-flows
 
 ## Column selection: `modified_columns` is a delta
 
-This is the field most often misread. `modified_columns` is **not** the list of columns to replicate.
-Every column the source exposes is selected by default; `modified_columns` records only the
-**departures** from that default — the columns you deselect, rename, retype, or mark as a key.
-
-The API's own wording for the field is: use it "if you want to unselect a column or change the column
-name or type."
-
-So a table with 40 columns where you drop one and rename another has exactly two entries:
-
-```hcl
-details = {
-  name         = "customers"
-  is_selected  = true
-  target_table = "customers"
-  modified_columns = [
-    { name = "internal_notes", is_selected = false },
-    { name = "email_address", is_selected = true, alias = "EMAIL" },
-  ]
-}
-```
-
-Listing only the columns you *want* is the common mistake: the columns you omit stay selected, so you
-get them anyway.
-
-Each item is a union discriminated on `target_type` (`snowflake`, `bigquery`, `redshift`, `athena`,
-`azure_sql`, `azure_synapse_analytics`, `databricks`, `postgres_rds`, `s3`, `gcs`, `blob_storage`,
-`target_email`). The discriminator has a per-arm default, so working configurations commonly omit it.
-`name` and `is_selected` are required; the rest are optional:
-
-| Field | Purpose |
-| --- | --- |
-| `is_selected` | **Required.** `false` deselects the column. |
-| `name` | **Required.** The source column name. |
-| `alias` | Rename — the destination column name. |
-| `type` | Override the mapped type. |
-| `is_key` | Mark as a merge key (needed by `loading_method = "merge"`). |
-| `expression` | Makes this a calculated column. |
-| `calculated_column_mode` | `source` or `target` — where the expression is evaluated. |
-| `order` | Column ordering. |
-| `cluster_key` | Clustering key position. |
-| `mode` | `NULLABLE`, `REQUIRED`, `REPEATED` (BigQuery). |
-| `is_partition` | BigQuery partition column. |
-
-### Let the data source discover the mapping
-
-`boomi_data_integration_source_metadata` introspects the live source and emits a ready-made
-`schemas[]` block, including per-table extract settings. Decode it straight into `properties_json`
-instead of hand-writing table lists — see
-[Incremental extraction](../guides/incremental-extraction#let-the-data-source-write-it-for-you).
+`modified_columns` is **not** the list of columns to replicate — every column
+is selected by default, and this field records only the departures (drop,
+rename, retype, mark as key). Listing only the columns you *want* is the
+common mistake: omitted columns stay selected, so you get them anyway. Full
+field table, the discovery data source, and the exact contract live in
+[Metadata & Schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
 
 ## The `target` union
 
@@ -179,7 +136,6 @@ Fields shared by the warehouse arms: `connection_id`, `loading_method`, `merge_m
 `target_prefix`, `single_table_settings`, `file_zone_settings`, `file_path_destination`,
 `is_ordered_merge_key`, `order_expression`, `additional_settings`.
 
-`loading_method` is `LoadingMode`: `overwrite`, `append`, `merge`. With `merge`, set `merge_method` —
-Snowflake accepts `switch_tables`, `delete_insert`, `merge`; the other database targets add
-`insert_on_conflict`. The key a merge matches on is the column marked `is_key = true` in
-`modified_columns`.
+`loading_method` (`overwrite`/`append`/`merge`) and `merge_method` are covered in full — including
+which `merge_method` values each target family accepts — in
+[Loading Methods](./loading-methods.md).

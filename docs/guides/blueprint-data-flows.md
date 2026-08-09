@@ -1,6 +1,6 @@
 ---
 page_title: "Blueprint data flows"
-subcategory: "Data flows"
+subcategory: "Data flow types"
 description: |-
   Using a blueprint as a data flow source: the blueprint_file / blueprint
   two-resource split, the source.additional_settings.recipe_id reference, and

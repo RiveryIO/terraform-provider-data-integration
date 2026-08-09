@@ -213,20 +213,22 @@ terraform {
 
 ## Examples
 
-| Example | What it shows |
-|---|---|
-| [`data-flow-basic/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/data-flow-basic) | Minimal Jira → Snowflake full-load flow |
-| [`jira-to-snowflake/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/jira-to-snowflake) | Full load vs. rolling-window predefined report |
-| [`cdc/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/cdc) | MySQL CDC — snapshot-then-stream and stream-only |
-| [`mysql-incremental-to-snowflake/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/mysql-incremental-to-snowflake) | Date-range incremental extraction |
-| [`logic-flow/`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/logic-flow) | Orchestration: chain flows and SQL steps |
+Every runnable example in the repo, organized by topic, is indexed in the
+[Examples](./examples.md) guide.
 
 ---
 
 ## Next steps
 
 - [Authentication](./authentication.md) — both auth modes, every parameter, and how the right one gets chosen
-- [CDC Data Flows](./cdc-data-flows.md) — snapshot + streaming CDC
-- [Blueprint Data Flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
+- [Connections](./connections.md) — finding the right properties, keyfile uploads, file-zone linking
+- [Data Flow Types](./data-flow-types.md) — the `run_type` enum and which guide applies
 - [Logic Data Flows](./logic-data-flows.md) — orchestration steps
 - [Incremental Extraction](./incremental-extraction.md) — date-range and running-number modes
+- [CDC Data Flows](./cdc-data-flows.md) — snapshot + streaming CDC
+- [Loading Methods](./loading-methods.md) — overwrite, append, merge
+- [Metadata & Schema](./metadata-and-schema.md) — column selection and schema discovery
+- [Activation](./activation.md) — how `activate` and drift reconciliation work
+- [Environments & Variables](./environments-and-variables.md) — environments, environment variables, dataflow variables, groups
+- [Blueprint Data Flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
+- [Examples](./examples.md) — every runnable example in the repo, indexed by topic

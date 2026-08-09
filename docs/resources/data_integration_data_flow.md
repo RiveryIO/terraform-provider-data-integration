@@ -103,7 +103,7 @@ resource "boomi_data_integration_data_flow" "mysql_to_snowflake" {
 
 ### Optional
 
-- `activate` (Boolean) Desired activation state of the data flow. true activates it (the provider runs the disable → update → enable_cdc → activate sequence the API requires), false disables it, and omitting it leaves activation unmanaged — there is deliberately no default. Reconciled on refresh against the API's metadata.river_status, so out-of-band activation shows up as drift; see "Activation" below.
+- `activate` (Boolean) Desired activation state of the data flow. true activates it — disabling it first if it's currently active, updating it, then (for CDC flows only) validating the source and starting the change-data-capture streaming process, before the final activation call — false disables it, and omitting it leaves activation unmanaged — there is deliberately no default. Reconciled on refresh against the API's metadata.river_status, so out-of-band activation shows up as drift; see "Activation" below.
 - `description` (String) Description. Stored under the API's metadata.description (a top-level description is rejected).
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.
@@ -208,26 +208,10 @@ reconciled normally on refresh.
 
 ## Activation
 
-`activate` is the desired activation state, and it has three states, not two:
-
-| `activate` | Behaviour |
-| --- | --- |
-| `true` | The provider enables the flow: `disable` (only if currently active) → `update` → `enable_cdc` (CDC flows only) → `activate`. |
-| `false` | The provider disables the flow if it is currently active. |
-| omitted | Activation is **not managed**. There is deliberately no default: the provider adopts whatever the server reports (a newly created data flow is disabled) and never activates or disables the flow on later applies. |
-
-The `update` step in that sequence is not redundant. A data flow created through the API is not yet
-activatable: it has to be updated once before the activate call will accept it, and skipping the PUT
-fails activation with `RVR-ACTIVATE-500` on every API-created flow. The provider always issues that
-PUT, so you never have to sequence it yourself.
-`enable_cdc` sets `ENABLE_LOG` on a log-based flow; see
-[CDC data flows](../guides/cdc-data-flows) for the full sequence.
-
-Refresh reconciles `activate` against the API's `metadata.river_status`, so an activate/disable
-performed outside this resource — the console, the API, or the `data_flow_run` resource — shows up as
-drift on the next plan and, when `activate` is set explicitly, is corrected on the next apply. When
-the API omits `river_status` (observed on a small fraction of data flows) the previously known value
-is kept. The read-only `status` attribute exposes the raw server value.
+`activate` is the desired activation state — three states (`true`/`false`/
+omitted), a multi-step sequence behind `true`, and drift reconciliation
+against `metadata.river_status`. See [Activation](../guides/activation) for
+the full behavior.
 
 ## Logic data flows
 
