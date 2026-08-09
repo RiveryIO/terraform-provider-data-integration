@@ -69,6 +69,7 @@ variable "utc_offset" {
 variable "target_database" {
   type        = string
   description = "Snowflake database to load into."
+  default     = null
 }
 
 variable "target_schema" {

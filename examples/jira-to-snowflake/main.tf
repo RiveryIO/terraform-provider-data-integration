@@ -1,18 +1,8 @@
-# Jira → Snowflake — two data flows in one example.
+# Jira → Snowflake — two data flows, two module calls.
 #
-# This example creates:
-#   1. jira_regular   — fetches the Jira "issue" report into a single Snowflake
-#                       table (run_type = "regular"). Column schema is pinned to
-#                       the standard 147-column Jira issue layout via
-#                       target.single_table_settings.mapping in the module default.
-#
-#   2. jira_predefined — runs one or more Jira built-in reports (user, project,
-#                        sprint, …) and loads each into its own Snowflake table
-#                        (run_type = "predefined_report").
-#
-# Both flows use the same Jira and Snowflake connections defined below.
-# The two local modules wrap github.com/RiveryIO/terraform-data-integration-dataflow
-# with Jira-specific defaults baked in.
+# Supply the two connections and a target database; everything else
+# (extract settings, column schema, loading method, …) is pre-configured
+# inside each module.
 
 terraform {
   required_providers {
@@ -64,67 +54,25 @@ resource "boomi_data_integration_connection" "snowflake" {
   })
 }
 
-# ── Flow 1: regular — Jira Issues → one Snowflake table ──────────────────────
-#
-# run_type = "regular" pulls the chosen Jira report on each run and writes all
-# rows to a single target table. The module defaults to the "issue" report with
-# a standard 147-column schema; override columns = [...] to narrow or extend it.
+# ── Flow 1: Jira Issues → one Snowflake table (regular) ──────────────────────
 
 module "jira_regular" {
   source = "./modules/jira-to-snowflake"
 
   jira_connection_id      = boomi_data_integration_connection.jira.id
   snowflake_connection_id = boomi_data_integration_connection.snowflake.id
-
-  name                  = "Jira Issues → Snowflake"
-  activate              = var.activate
-  jira_report           = "issue"
-  keep_raw_customfields = true
-  time_period           = "date_range"
-  start_date            = "2024-01-01 00:00:00"
-  loading_method        = "overwrite"
-  target_database       = var.snowflake_database
-  target_schema         = var.snowflake_schema
-  target_table          = "jira_issues"
-  # columns uses the module default: full 147-column standard Jira issue schema.
-  # Override with a trimmed list to load only specific fields.
+  target_database         = var.snowflake_database
+  target_table            = "jira_issues"
 }
 
-# ── Flow 2: predefined_report — multiple Jira reports → multiple tables ───────
-#
-# run_type = "predefined_report" runs one or more Jira built-in report endpoints.
-# Each report writes to its own Snowflake table. Tables are created as:
-#   <target_table_prefix><report.target_table>
-# e.g. prefix "" + target_table "jira_project" → table "jira_project"
+# ── Flow 2: Jira predefined reports → one table per report ───────────────────
 
 module "jira_predefined" {
   source = "./modules/jira-predefined-report-to-snowflake"
 
   jira_connection_id      = boomi_data_integration_connection.jira.id
   snowflake_connection_id = boomi_data_integration_connection.snowflake.id
-
-  name                = "Jira Predefined Reports → Snowflake"
-  activate            = var.activate
-  target_database     = var.snowflake_database
-  target_schema       = var.snowflake_schema
-  target_table_prefix = ""
-
-  reports = [
-    {
-      report_name  = "project"
-      target_table = "jira_project"
-      time_period  = "date_range"
-      start_date   = "2024-01-01 00:00:00"
-      last_days    = 3
-    },
-    {
-      report_name  = "user"
-      target_table = "jira_user"
-      time_period  = "date_range"
-      start_date   = "2024-01-01 00:00:00"
-      last_days    = 3
-    },
-  ]
+  target_database         = var.snowflake_database
 }
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
