@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +49,7 @@ type connectionModel struct {
 	Name                       types.String         `tfsdk:"name"`
 	Type                       types.String         `tfsdk:"type"`
 	ParametersJSON             jsontypes.Normalized `tfsdk:"parameters_json"`
+	ParametersFingerprint      types.String         `tfsdk:"parameters_fingerprint"`
 	FzConnectionID             types.String         `tfsdk:"fz_connection_id"`
 	ConnectionInfo             jsontypes.Normalized `tfsdk:"connection_info"`
 	FileParams                 types.Map            `tfsdk:"file_params"`
@@ -98,6 +101,17 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Description: "Connection-type-specific parameters as a JSON object, including " +
 					"credentials. Write-only: never stored in state. The API omits secrets on " +
 					"read, so drift detection for credentials is not possible.",
+			},
+			"parameters_fingerprint": schema.StringAttribute{
+				Computed: true,
+				Description: "Internal: sha256 of the parameters_json value the provider last sent " +
+					"to the API. Never derived from or exposing secret content on its own -- exists " +
+					"solely so Terraform has something to diff, since parameters_json itself is " +
+					"write-only and invisible to plan. Without this, importing an existing connection " +
+					"and then setting parameters_json in config produces a clean \"No changes\" plan " +
+					"forever, and the credentials in config are never sent to the API -- Update() is " +
+					"simply never called. Do not set manually.",
+				PlanModifiers: []planmodifier.String{&parametersFingerprintPlanModifier{}},
 			},
 			"fz_connection_id": schema.StringAttribute{
 				Optional:    true,
@@ -174,6 +188,53 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 
 func (r *connectionResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.data = configureProviderData(req, resp)
+}
+
+// fingerprintParams returns a stable, non-secret-revealing hash of a
+// parameters_json value, used solely to give Terraform something to diff for
+// an otherwise write-only attribute. A distinct constant (rather than the hash
+// of an empty string) marks "no parameters_json configured at all" so it can
+// never collide with a hash of real (even empty-object) JSON content.
+func fingerprintParams(v jsontypes.Normalized) string {
+	if v.IsNull() || v.IsUnknown() {
+		return "absent"
+	}
+	sum := sha256.Sum256([]byte(v.ValueString()))
+	return hex.EncodeToString(sum[:])
+}
+
+// parametersFingerprintPlanModifier recomputes parameters_fingerprint from
+// parameters_json's CONFIG value on every plan (not its prior state value).
+// This is what forces a diff -- and therefore an Update() call -- the first
+// time a plan runs after `import`, when state has no fingerprint yet but
+// config declares real credentials: without this, parameters_json (WriteOnly)
+// never participates in plan-diff computation on its own, so Terraform reports
+// "No changes" for an imported connection even though its credentials were
+// never actually sent to the API. See connection_resource_test.go for the
+// regression test reproducing this against a mocked import+plan sequence.
+type parametersFingerprintPlanModifier struct{}
+
+func (m *parametersFingerprintPlanModifier) Description(_ context.Context) string {
+	return "Recomputes from parameters_json's config value so write-only credential changes are detected."
+}
+
+func (m *parametersFingerprintPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m *parametersFingerprintPlanModifier) PlanModifyString(
+	ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse,
+) {
+	// Resource is being destroyed: leave the planned value as-is (null).
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var cfgParams jsontypes.Normalized
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("parameters_json"), &cfgParams)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.PlanValue = types.StringValue(fingerprintParams(cfgParams))
 }
 
 func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -264,6 +325,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	primeFileParamPaths(&plan, filePaths, &resp.Diagnostics)
 	r.apply(created, envID, &plan, &resp.Diagnostics)
+	plan.ParametersFingerprint = types.StringValue(fingerprintParams(plan.ParametersJSON))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -395,6 +457,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	primeFileParamPaths(&plan, filePaths, &resp.Diagnostics)
 	r.apply(updated, envID, &plan, &resp.Diagnostics)
+	plan.ParametersFingerprint = types.StringValue(fingerprintParams(plan.ParametersJSON))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
