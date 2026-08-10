@@ -583,19 +583,26 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// Logic rivers are hardcoded server-side to always be ACTIVE (their
 	// RiverStatusEnum never reaches DISABLED for this type), and the real API
 	// rejects disable_river outright for type="logic" (400: "disable_river is
-	// not supported for logic river types"). There is nothing to disable, so
-	// skip the dance entirely for this type rather than always attempting it.
+	// not supported for logic river types") -- there is no state for this
+	// type to disable INTO, so it's excluded from the deactivation case below
+	// as well as the (now-removed) pre-edit case.
 	isLogic := plan.Type.ValueString() == "logic"
 
+	// disable_river is called ONLY to actually realize activate: true -> false
+	// (the desired end state IS "disabled", so we call the endpoint that makes
+	// that real) -- never as a defensive "must be inactive before any PUT"
+	// pre-step. Investigated the real backend (rivery_api_service,
+	// see CORE-2346): PUT /rivers/{cross_id} has no general "must be inactive"
+	// requirement for any river type, so calling disable_river before editing
+	// an active-staying-active flow (or before activating a previously-
+	// inactive one) was pure unnecessary overhead, not a real requirement --
+	// removed for every type, not just logic. The one genuine exception,
+	// CDC log-based rivers rejecting a `properties` change while logging is
+	// enabled, is a narrow, distinct lock (_validate_locked_properties_for_
+	// active_river server-side) that surfaces as its own targeted API error
+	// on UpdateDataFlow below rather than being pre-empted here.
 	deactivated := false
-	if !isLogic && (wantActive || wasActive) {
-		// Disable before editing — the API requires the data flow to be inactive
-		// during a PUT when it is currently active. Gating on wasActive (the
-		// refreshed server state — see Read) as well as wantActive means this also
-		// fires on an activate true -> false transition, and since we do not
-		// re-activate below when wantActive is false, that single disable call is
-		// what makes activate = false actually disable the flow instead of being a
-		// silently-ignored write-intent.
+	if !isLogic && wasActive && !wantActive {
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
@@ -604,7 +611,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 		}
-		deactivated = wasActive && !wantActive
+		deactivated = true
 	}
 
 	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
