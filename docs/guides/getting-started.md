@@ -91,7 +91,7 @@ resource "boomi_data_integration_connection" "snowflake" {
 ```
 
 To list all available connection types and their required fields, use the
-[`boomi_data_integration_connection_types`](../data-sources/connection_types.md)
+[`boomi_data_integration_connection_types`](../data-sources/data_integration_connection_types.md)
 data source.
 
 ---

@@ -1,0 +1,30 @@
+---
+page_title: "List all target types ({{.Name}})"
+subcategory: "Connections"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# List all target types
+
+The catalog of targets a data flow can write to — read from the live Data Integration API, so a new
+target appears here with no provider release.
+
+## How it works
+
+A target's shape depends on the combination of connection type and data-flow type, so each entry
+carries `target_type` (the value for a data flow's `properties.target.name`), `connection_type` (which
+connection it binds to), `logic_step_type`, and `data_flow_type_id`. Filter the list down to the
+connection type you're targeting before writing the `target` block. This is the target-side
+counterpart to [`boomi_data_integration_source_types`](./data_integration_source_types).
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_target_types/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Connections](../guides/connections#finding-the-right-properties-for-a-target) — the full
+  worked example of filtering this list down to one connection type.

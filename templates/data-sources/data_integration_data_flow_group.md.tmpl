@@ -1,0 +1,32 @@
+---
+page_title: "Look up a data flow group ({{.Name}})"
+subcategory: "Environments & variables"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# Look up a data flow group
+
+Finds an existing group (folder) by name, so a data flow can be filed into it — this is how you
+place a data flow into the same organizational folder the console uses, from Terraform.
+
+## How it works
+
+Groups are organizational only — they have nothing to do with permissions or access control. They
+must be created in the Data Integration console first; the API this provider calls only exposes
+read access, so `{{.Name}}` can look one up but this provider cannot create one.
+
+Pass the `id` this returns as `group_id` on a
+[`boomi_data_integration_data_flow`](../resources/data_integration_data_flow) resource.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_data_flow_group/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Environments & variables](../guides/environments-and-variables#data-flow-groups-organizational-folders-not-permissions)
+  — the full picture, including the explicit callout that this provider doesn't manage users or
+  permission groups.

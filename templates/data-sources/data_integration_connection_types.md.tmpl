@@ -1,0 +1,31 @@
+---
+page_title: "List all connection types ({{.Name}})"
+subcategory: "Connections"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# List all connection types
+
+Browse every connection type the Data Integration API currently supports — Snowflake, MySQL, Jira,
+S3, and everything else. Read directly from the live API, so a new connector shows up here with no
+provider release.
+
+## How it works
+
+Use `{{.Name}}` to confirm a `type` value before you commit to it in a
+[`boomi_data_integration_connection`](../resources/data_integration_connection) resource, or to build
+your own tooling that browses the catalog. Once you know which type you want, read its exact
+configurable fields with
+[`boomi_data_integration_connection_type`](./data_integration_connection_type).
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_connection_types/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Connections](../guides/connections#finding-the-right-properties-for-a-connection-type) — the full
+  discovery workflow, from browsing types to filling in `parameters_json`.

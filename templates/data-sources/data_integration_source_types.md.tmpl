@@ -1,0 +1,29 @@
+---
+page_title: "List all source types ({{.Name}})"
+subcategory: "Connections"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# List all source types
+
+The catalog of sources a data flow can extract from — read from the live Data Integration API, so a
+new source appears here with no provider release.
+
+## How it works
+
+Each entry's `id` is the value to use as a data flow's `properties.source.name`. `connection_type`
+tells you which `boomi_data_integration_connection` type that source binds to, and `status` flags
+whether it's currently enabled. This is the source-side counterpart to
+[`boomi_data_integration_target_types`](./data_integration_target_types) — most integrations need to
+check both.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/boomi_data_integration_source_types/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [Choosing a data flow type](../guides/data-flow-types) — where `source.name` is actually used.
