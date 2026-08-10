@@ -1,15 +1,3 @@
-terraform {
-  required_providers {
-    boomi = {
-      source = "riveryio/data-integration"
-    }
-  }
-}
-
-provider "boomi" {
-  # api_url / token / account_id from DATA_INTEGRATION_* env vars
-}
-
 # Discover the full connector catalog (read from the live API).
 data "boomi_data_integration_connection_types" "all" {}
 

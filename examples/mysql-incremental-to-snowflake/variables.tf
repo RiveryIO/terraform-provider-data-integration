@@ -1,21 +1,3 @@
-# ── Provider / API ────────────────────────────────────────────────────────────
-variable "api_url" {
-  type        = string
-  description = "Base URL of the Data Integration API."
-}
-
-variable "api_token" {
-  type        = string
-  description = "Data Integration API token. Prefer the DATA_INTEGRATION_API_TOKEN env var over putting this in a tfvars file."
-  sensitive   = true
-  default     = null
-}
-
-variable "account_id" {
-  type    = string
-  default = null
-}
-
 variable "environment_id" {
   type        = string
   description = "An EXISTING environment ID. This example does not create one."

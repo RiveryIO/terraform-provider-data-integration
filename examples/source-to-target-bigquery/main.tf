@@ -11,21 +11,6 @@
 # BigQuery" until the connection's key is supplied out-of-band (e.g. the console).
 # See README.md.
 
-terraform {
-  required_providers {
-    boomi = {
-      source = "riveryio/data-integration"
-    }
-  }
-}
-
-provider "boomi" {
-  api_url        = var.api_url
-  token          = var.api_token
-  account_id     = var.account_id
-  environment_id = var.environment_id
-}
-
 resource "boomi_data_integration_connection" "bq" {
   environment_id = var.environment_id
   name           = var.bq_connection_name
