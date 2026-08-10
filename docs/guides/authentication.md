@@ -1,5 +1,6 @@
 ---
 page_title: "Authentication"
+subcategory: "Authentication & connections"
 description: |-
   Set up the provider with either a Data Integration API token or Boomi Platform credentials.
 ---

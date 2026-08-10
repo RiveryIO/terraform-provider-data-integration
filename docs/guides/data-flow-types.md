@@ -1,6 +1,6 @@
 ---
 page_title: "Choosing a data flow type"
-subcategory: "Data flow types"
+subcategory: "Building data flows"
 description: |-
   How to pick the right run_type and guide for your data flow.
 ---
@@ -34,7 +34,7 @@ then points you at the detailed guide for whichever value applies.
   `predefined_report`, see
   [API connector data flows](./api-connector-data-flows.md).
   If the connector needs mandatory Source Settings
-  (`is_native = true`), see [Required settings for API connectors](./api-connectors.md)
+  (`is_native = true`), see [API connector required settings](./api-connectors.md)
   first.
 - **Recipe-driven, parameterized flows** → Blueprint, `multi_tables` on the
   source side referencing a `recipe_id` — see
@@ -42,13 +42,6 @@ then points you at the detailed guide for whichever value applies.
 - **Orchestration — chaining flows, running SQL/Python steps** → this isn't a
   `run_type` at all; it's `type = "logic"` on the same resource. See
   [Logic data flows](./logic-data-flows.md).
-
--> **A known discrepancy, not yet resolved:** the
-[Getting started](./getting-started.md) example sets
-`run_type = "single_table"`, a value that does not appear in `RunTypeEnum`
-above and isn't referenced anywhere in the provider's Go source. It has not
-been changed as part of this reorganization — flagging it here rather than
-guessing whether the example or the documented enum needs the fix.
 
 ## Extract method and schema, independent of `run_type`
 
@@ -59,4 +52,4 @@ independent of which one you chose:
   see [Incremental extraction](./incremental-extraction.md) and
   [CDC data flows](./cdc-data-flows.md).
 - **Which columns, and how they're typed** — see
-  [Metadata & schema](./metadata-and-schema.md).
+  [Schema & column mapping](./metadata-and-schema.md).

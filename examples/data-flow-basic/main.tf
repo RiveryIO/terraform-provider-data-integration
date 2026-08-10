@@ -37,7 +37,7 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name                = "jira"
       connection_id       = boomi_data_integration_connection.jira.id
-      run_type            = "single_table"
+      run_type            = "regular"
       cdc_settings        = null
       additional_settings = { source_type = "source_to_target" }
     }

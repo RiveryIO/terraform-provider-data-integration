@@ -1,6 +1,6 @@
 ---
 page_title: "API connector data flows"
-subcategory: "Data flow types"
+subcategory: "Building data flows"
 description: |-
   The properties_json shape for a data flow whose source is a SaaS/API
   connector: run_type regular vs predefined_report, when schemas is present,
@@ -11,7 +11,7 @@ description: |-
 
 A data flow extracts from one source and loads into one target. This guide
 covers the case where the source is a SaaS or API connector (Jira, Shopify, Salesforce, …). For
-RDBMS sources see [Database data flows](../guides/database-data-flows).
+RDBMS sources see [Database data flows](./database-data-flows.md).
 
 `properties_json` is passed to the API verbatim, so **nothing in this provider validates the shape
 below**. This guide is the contract.
@@ -53,7 +53,7 @@ Only `name` is required by the API. The fields that matter in practice:
 | `additional_settings` | Connector-specific. Defaults to `{}`. |
 
 Some connectors additionally require a shared block of mandatory Source Settings before any report
-will run — see [Required settings for API connectors](../guides/api-connectors).
+will run — see [API connector required settings](./api-connectors.md).
 
 ### `run_type`: `regular` vs `predefined_report`
 
@@ -157,4 +157,4 @@ shape alone.
 On SaaS/predefined-report tables `extract_method` is an untyped free string, so a misspelling such as
 `increment` is accepted silently. It is **wrong for database sources**, where the field is
 enum-validated. Do not copy an `extract_method` value out of a SaaS example into a database flow —
-see [Incremental extraction](../guides/incremental-extraction).
+see [Incremental extraction](./incremental-extraction.md).

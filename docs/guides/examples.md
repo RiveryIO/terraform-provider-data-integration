@@ -1,6 +1,5 @@
 ---
 page_title: "Examples"
-subcategory: "Examples"
 description: |-
   Every runnable example in this repository, organized by topic.
 ---
@@ -68,24 +67,24 @@ resource "boomi_data_integration_connection" "s3" {
 
 ```terraform
 # Discover the full connector catalog (read from the live API).
-data "boomi_connection_types" "all" {}
+data "boomi_data_integration_connection_types" "all" {}
 
 # Discover the configurable fields of one type — the field set stays current
 # as the API adds connectors/fields, without changing this provider.
-data "boomi_connection_type" "mysql" {
+data "boomi_data_integration_connection_type" "mysql" {
   connection_type = "mysql"
 }
 
 output "connection_type_count" {
-  value = length(data.boomi_connection_types.all.connection_types)
+  value = length(data.boomi_data_integration_connection_types.all.connection_types)
 }
 
 output "mysql_field_ids" {
-  value = data.boomi_connection_type.mysql.property_names
+  value = data.boomi_data_integration_connection_type.mysql.property_names
 }
 
 output "mysql_schema_json" {
-  value = data.boomi_connection_type.mysql.properties_json
+  value = data.boomi_data_integration_connection_type.mysql.properties_json
 }
 ```
 
@@ -95,19 +94,19 @@ output "mysql_schema_json" {
 # Discover the source and target catalogs straight from the live API, so a
 # source-to-target data flow can be authored against current, valid values
 # without hardcoding — new sources/targets appear with no provider release.
-data "boomi_source_types" "all" {}
-data "boomi_target_types" "all" {}
+data "boomi_data_integration_source_types" "all" {}
+data "boomi_data_integration_target_types" "all" {}
 
 output "source_type_count" {
-  value = length(data.boomi_source_types.all.source_types)
+  value = length(data.boomi_data_integration_source_types.all.source_types)
 }
 
 output "enabled_source_ids" {
-  value = [for s in data.boomi_source_types.all.source_types : s.id if s.status == "enabled"]
+  value = [for s in data.boomi_data_integration_source_types.all.source_types : s.id if s.status == "enabled"]
 }
 
 output "target_type_ids" {
-  value = [for t in data.boomi_target_types.all.target_types : t.target_type]
+  value = [for t in data.boomi_data_integration_target_types.all.target_types : t.target_type]
 }
 ```
 
@@ -157,7 +156,7 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name                = "jira"
       connection_id       = boomi_data_integration_connection.jira.id
-      run_type            = "single_table"
+      run_type            = "regular"
       cdc_settings        = null
       additional_settings = { source_type = "source_to_target" }
     }

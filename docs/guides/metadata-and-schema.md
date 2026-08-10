@@ -1,11 +1,11 @@
 ---
-page_title: "Metadata & schema"
-subcategory: "Metadata & schema"
+page_title: "Schema & column mapping"
+subcategory: "Extract & load"
 description: |-
   Column selection, renaming, and retyping, and how to discover a source's schema instead of hand-writing it.
 ---
 
-# Metadata & schema
+# Schema & column mapping
 
 Two related things live here: how to describe which columns a data flow moves
 (and how they're renamed/retyped), and how to discover that shape from the

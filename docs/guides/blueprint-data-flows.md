@@ -1,6 +1,6 @@
 ---
 page_title: "Blueprint data flows"
-subcategory: "Data flow types"
+subcategory: "Building data flows"
 description: |-
   Using a blueprint as a data flow source: the blueprint_file / blueprint
   two-resource split, the source.additional_settings.recipe_id reference, and
@@ -111,7 +111,7 @@ resource "boomi_data_integration_data_flow" "posts_to_snowflake" {
 | `source.additional_settings.source_type` | The literal `blueprint`. |
 
 The `target` block is the same union as any other data flow — see
-[Loading methods](../guides/loading-methods#the-target-union).
+[Loading methods](./loading-methods.md#the-target-union).
 
 ## Per-step tables and `interface_parameters`
 
