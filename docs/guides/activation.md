@@ -1,6 +1,6 @@
 ---
 page_title: "Activation"
-subcategory: "Activation"
+subcategory: "Operations & environments"
 description: |-
   How activate manages a data flow's running state, and how drift is reconciled.
 ---

@@ -1,6 +1,6 @@
 ---
 page_title: "Database data flows"
-subcategory: "Data flow types"
+subcategory: "Building data flows"
 description: |-
   The properties_json shape for a data flow whose source is a database:
   run_type multi_tables, the per-table details contract, and why
@@ -12,7 +12,7 @@ description: |-
 A data flow with an RDBMS source (MySQL, PostgreSQL, SQL Server, Oracle, BigQuery,
 Snowflake, …) replicates one or more **tables** per run. That is what distinguishes it from the
 single-report shape in
-[API connector data flows](../guides/api-connector-data-flows).
+[API connector data flows](./api-connector-data-flows.md).
 
 `properties_json` is passed to the API verbatim, so **nothing in this provider validates the shape
 below**. This guide is the contract.
@@ -96,11 +96,11 @@ Full load is `extract_method = "all"` and needs nothing else.
 Incremental is `extract_method = "incremental"` plus `incremental_field` and **exactly one** of
 `date_range`, `running_number`, `epoch`. Those companion fields, the `date_range` shape, and the
 `incremental` vs `increment` spelling trap are documented in
-[Incremental extraction](../guides/incremental-extraction) — read that before writing an incremental
+[Incremental extraction](./incremental-extraction.md) — read that before writing an incremental
 table, and do not duplicate the contract by hand.
 
 `log` selects change-data-capture, which has its own rules (a mandatory scheduler, an activation
-sequence, and an offset resource): see [CDC data flows](../guides/cdc-data-flows).
+sequence, and an offset resource): see [CDC data flows](./cdc-data-flows.md).
 
 ## Column selection: `modified_columns` is a delta
 
@@ -109,7 +109,7 @@ is selected by default, and this field records only the departures (drop,
 rename, retype, mark as key). Listing only the columns you *want* is the
 common mistake: omitted columns stay selected, so you get them anyway. Full
 field table, the discovery data source, and the exact contract live in
-[Metadata & schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
+[Schema & column mapping](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
 
 ## The `target` block
 

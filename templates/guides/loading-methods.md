@@ -1,6 +1,6 @@
 ---
 page_title: "Loading methods"
-subcategory: "Loading methods"
+subcategory: "Extract & load"
 description: |-
   How a data flow writes to its target — overwrite, append, or merge.
 ---
@@ -42,7 +42,7 @@ target = {
 Two things have to be true for `merge` to work:
 
 1. **A key column.** Mark it in `modified_columns` with `is_key = true` — see
-   [Metadata & schema](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
+   [Schema & column mapping](./metadata-and-schema.md#column-selection-modified_columns-is-a-delta).
    This is the column the merge matches existing rows on.
 2. **`merge_method`**, naming the actual merge strategy:
 

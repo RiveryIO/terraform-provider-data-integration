@@ -48,6 +48,13 @@ you mean.
 
 ---
 
+Prefer to start from a business scenario rather than the mechanics? [Integration patterns by
+use case](./use-cases.md) maps common setups — operational DB → Snowflake, ad platforms →
+BigQuery, Salesforce → Snowflake, custom REST → Snowflake, CDC replication — to the exact
+`run_type`, `extract_method`, and `loading_method` each needs.
+
+---
+
 ## 2 — Create connections
 
 A connection authenticates to one system. `parameters_json` carries the
@@ -113,7 +120,7 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name          = "jira"
       connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "single_table"
+      run_type      = "regular"
       cdc_settings  = null
       additional_settings = { source_type = "source_to_target" }
     }
@@ -220,15 +227,20 @@ Every runnable example in the repo, organized by topic, is indexed in the
 
 ## Next steps
 
+Start from a scenario: [Integration patterns by use case](./use-cases.md).
+Copy a working config: [Examples](./examples.md).
+
+**Authentication & connections**
 - [Authentication](./authentication.md) — both auth modes, every parameter, and how the right one gets chosen
 - [Connections](./connections.md) — finding the right properties, keyfile uploads, file-zone linking
-- [Choosing a data flow type](./data-flow-types.md) — the `run_type` enum and which guide applies
-- [Logic data flows](./logic-data-flows.md) — orchestration steps
-- [Incremental extraction](./incremental-extraction.md) — date-range and running-number modes
-- [CDC data flows](./cdc-data-flows.md) — snapshot + streaming CDC
-- [Loading methods](./loading-methods.md) — overwrite, append, merge
-- [Metadata & schema](./metadata-and-schema.md) — column selection and schema discovery
+
+**Building data flows** — start with [Choosing a data flow type](./data-flow-types.md) for the `run_type` enum and which guide applies, then:
+- [Database data flows](./database-data-flows.md), [API connector data flows](./api-connector-data-flows.md), [API connector required settings](./api-connectors.md)
+- [Blueprint data flows](./blueprint-data-flows.md), [Logic data flows](./logic-data-flows.md)
+
+**Extract & load** — applies on top of any flow type:
+- [Incremental extraction](./incremental-extraction.md), [CDC data flows](./cdc-data-flows.md), [Loading methods](./loading-methods.md), [Schema & column mapping](./metadata-and-schema.md)
+
+**Operations & environments**
 - [Activation](./activation.md) — how `activate` and drift reconciliation work
 - [Environments & variables](./environments-and-variables.md) — environments, environment variables, dataflow variables, groups
-- [Blueprint data flows](./blueprint-data-flows.md) — parameterised recipe-driven flows
-- [Examples](./examples.md) — every runnable example in the repo, indexed by topic

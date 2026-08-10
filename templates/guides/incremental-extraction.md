@@ -1,6 +1,6 @@
 ---
 page_title: "Incremental extraction"
-subcategory: "Extract methods"
+subcategory: "Extract & load"
 description: |-
   The per-table extract_method contract for source-to-target data flows: the
   incremental vs increment spelling trap, the incremental_field plus
@@ -44,7 +44,7 @@ The API's `ExtractMethodEnum` is:
 | --- | --- |
 | `all` | Extract everything, no filter. |
 | `incremental` | Filter by an increment field/column. Requires the companion fields below. |
-| `log` | Log-based extraction (CDC). See [CDC data flows](../guides/cdc-data-flows). |
+| `log` | Log-based extraction (CDC). See [CDC data flows](./cdc-data-flows.md). |
 | `change_tracking` | SQL Server change tracking. |
 | `system_versioning` | SQL Server system-versioned temporal tables. |
 

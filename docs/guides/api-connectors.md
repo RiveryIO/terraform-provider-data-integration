@@ -1,13 +1,13 @@
 ---
-page_title: "Required settings for API connectors"
-subcategory: "Data flow types"
+page_title: "API connector required settings"
+subcategory: "Building data flows"
 description: |-
   How to supply an API connector's required Source Settings in a data flow's
   properties_json, and how to discover which settings are mandatory for a given
   connector.
 ---
 
-# Required settings for API connectors
+# API connector required settings
 
 Some SaaS sources drive every one of their reports from a shared set of "Source Settings" — the
 fields the console shows under *Source Settings — Connector settings applied to every report*, marked
@@ -94,5 +94,5 @@ Rules that bite:
 
 ## Related
 
-- [API connector data flows](../guides/api-connector-data-flows) — the rest of the
+- [API connector data flows](./api-connector-data-flows.md) — the rest of the
   flow shape (`run_type`, `schemas`, `target`) these settings sit inside.

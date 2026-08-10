@@ -1,6 +1,6 @@
 ---
 page_title: "Environments & variables"
-subcategory: "Environments & variables"
+subcategory: "Operations & environments"
 description: |-
   Managing environments, environment variables, dataflow variables, and data flow groups.
 ---

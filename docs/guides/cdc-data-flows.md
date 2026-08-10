@@ -1,6 +1,6 @@
 ---
 page_title: "CDC data flows"
-subcategory: "Extract methods"
+subcategory: "Extract & load"
 description: |-
   Log-based (CDC) data flows: the mandatory scheduler and its cron bounds, how
   the provider enables CDC on activation, and how to seed or reset the source
@@ -11,7 +11,7 @@ description: |-
 
 A **CDC** (log-based) data flow reads its source's change log instead of querying tables. It is
 selected per table with `extract_method = "log"` inside `properties_json` — see
-[Incremental extraction](../guides/incremental-extraction) for where that field lives.
+[Incremental extraction](./incremental-extraction.md) for where that field lives.
 
 CDC flows have two rules that non-CDC flows do not.
 

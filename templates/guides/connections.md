@@ -1,6 +1,6 @@
 ---
 page_title: "Connections"
-subcategory: "Connections"
+subcategory: "Authentication & connections"
 description: |-
   Connection types, discovering the right properties, keyfile uploads, and file-zone linking.
 ---
