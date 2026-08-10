@@ -542,6 +542,80 @@ func TestDataFlowUpdateActivationTransitions(t *testing.T) {
 	}
 }
 
+// TestDataFlowUpdateSkipsDisableForLogicType proves the CORE-2346 fix: the
+// real API rejects disable_river outright for type="logic" (400:
+// "disable_river is not supported for logic river types") because logic
+// rivers are hardcoded server-side to always be ACTIVE. An update to an
+// active (staying active) logic river must not attempt to disable it first,
+// unlike every other type (see TestDataFlowUpdateActivationTransitions,
+// which covers source_to_target and asserts the opposite).
+func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
+	const logicProps = `{"properties_type":"logic","logic_steps":[]}`
+
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			// Real behavior being guarded against: this must never be called
+			// for type="logic". If it is, fail the way the real API does.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"disable_river is not supported for logic river types."}`))
+		case strings.HasSuffix(req.URL.Path, "/activate_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"logic","metadata":{"river_status":"active"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	// Active staying active (no transition) — the case that unconditionally
+	// hit disable_river pre-fix, since the original guard was `wantActive ||
+	// wasActive`, not gated on an actual activate transition.
+	build := func() tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "logic"),
+			"properties_json": tftypes.NewValue(tftypes.String, logicProps),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"activate":        boolRaw(types.BoolValue(true)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	planRaw := build()
+	stateRaw := build()
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "disable_river") {
+			t.Errorf("disable_river must never be called for type=logic; got calls: %v", calls)
+		}
+	}
+}
+
 // TestDataFlowReadReconcilesActivate proves the refresh side of the state
 // machine: river_status lands on both status and activate, and an absent
 // river_status changes neither.

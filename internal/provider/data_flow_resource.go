@@ -580,8 +580,15 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 
+	// Logic rivers are hardcoded server-side to always be ACTIVE (their
+	// RiverStatusEnum never reaches DISABLED for this type), and the real API
+	// rejects disable_river outright for type="logic" (400: "disable_river is
+	// not supported for logic river types"). There is nothing to disable, so
+	// skip the dance entirely for this type rather than always attempting it.
+	isLogic := plan.Type.ValueString() == "logic"
+
 	deactivated := false
-	if wantActive || wasActive {
+	if !isLogic && (wantActive || wasActive) {
 		// Disable before editing — the API requires the data flow to be inactive
 		// during a PUT when it is currently active. Gating on wasActive (the
 		// refreshed server state — see Read) as well as wantActive means this also
@@ -653,12 +660,18 @@ func (r *dataFlowResource) Delete(ctx context.Context, req resource.DeleteReques
 	id := state.ID.ValueString()
 	// Disable before delete — the API rejects DELETE on an active data flow.
 	// DisableDataFlow is async; poll until done before issuing DELETE.
-	if opID, err := r.data.client.DisableDataFlow(ctx, envID, id); err != nil && !errors.Is(err, client.ErrNotFound) {
-		addAPIError(&resp.Diagnostics, "Error disabling data flow before delete", err)
-		return
-	} else if opID != "" {
-		if !r.waitForOp(ctx, envID, opID, &resp.Diagnostics) {
+	//
+	// Skip for type="logic": same rejection as in Update (400: "disable_river
+	// is not supported for logic river types") — logic rivers are hardcoded
+	// server-side to always be ACTIVE, so there is nothing to disable first.
+	if state.Type.ValueString() != "logic" {
+		if opID, err := r.data.client.DisableDataFlow(ctx, envID, id); err != nil && !errors.Is(err, client.ErrNotFound) {
+			addAPIError(&resp.Diagnostics, "Error disabling data flow before delete", err)
 			return
+		} else if opID != "" {
+			if !r.waitForOp(ctx, envID, opID, &resp.Diagnostics) {
+				return
+			}
 		}
 	}
 	if err := r.data.client.DeleteDataFlow(ctx, envID, id); err != nil {
