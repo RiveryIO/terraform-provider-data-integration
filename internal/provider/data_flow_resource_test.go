@@ -804,21 +804,25 @@ func TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateDisablesCDCOnDeactivation proves the other half of the
-// enable/disable-CDC pairing: deactivating a CDC river (true -> false) must
-// also call disable_cdc, even when properties isn't changing at all --
-// otherwise a "disabled" CDC river can still carry enable_log=true forward,
-// so a later properties-only edit on that now-inactive river would still
-// hit the same lock. disable_river alone was never enough (it doesn't touch
-// enable_log); tying the two together keeps "disabled" meaning disabled.
-func TestDataFlowUpdateDisablesCDCOnDeactivation(t *testing.T) {
+// TestDataFlowUpdateDeactivationSkipsSeparateCDCDisable proves that a real
+// deactivation of a CDC river (true -> false) does NOT need its own
+// disable_cdc call: disable_river's own operation already tears down the
+// CDC connector as an inner task (get_disable_inner_tasks_by_river_type ->
+// a "disable" pull-task with is_cdc=true). Confirmed live against a real
+// river: activated it, enabled CDC, called disable_river, and
+// shared_params.enable_log flipped to false immediately after with no
+// separate disable_cdc call. Calling disable_cdc here too would just be a
+// redundant (if harmless) extra round trip.
+func TestDataFlowUpdateDeactivationSkipsSeparateCDCDisable(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_cdc"),
-			strings.HasSuffix(req.URL.Path, "/disable_river"):
+		case strings.HasSuffix(req.URL.Path, "/disable_cdc"):
+			t.Errorf("disable_cdc must not be called on deactivation -- disable_river's own inner task already handles it")
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.Header().Set("Content-Type", "application/json")
@@ -863,7 +867,6 @@ func TestDataFlowUpdateDisablesCDCOnDeactivation(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
 	wantCalls := []string{
-		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_cdc",
 		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
 		"GET /v1/accounts/acc/environments/env1/rivers/river1",
 		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
