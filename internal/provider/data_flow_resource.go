@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
@@ -613,41 +611,40 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		deactivated = true
 	}
 
-	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
-	if err != nil {
-		// The one genuine exception to "disable_river is never a defensive
-		// pre-step": CDC log-based rivers reject a `properties` change
-		// outright while logging is enabled (_validate_locked_properties_
-		// for_active_river server-side, LOCKED_PROPERTIES_FOR_ACTIVE_RIVER =
-		// ['properties']) -- API error 400: "can not update properties for
-		// an active data flow. Please disable the data flow and try again".
-		//
-		// This reacts to that specific error instead of trying to predict it
-		// from plan/state ahead of time: state.Activate/PropertiesJSON is a
-		// PLAN-TIME snapshot, and Atlantis (and any workflow that separates
-		// plan from apply) can run them minutes apart, during which a CDC
-		// river's real activation can change -- a proactive
-		// wasActive-from-state check reliably misses the case where the
-		// river was inactive at plan time but active again by apply time
-		// (confirmed against a real river that flip-flopped mid-session).
-		// Reacting to the API's own real-time judgment sidesteps that
-		// staleness entirely.
-		if !isLogic && isLockedPropertiesError(err) {
-			if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
-				addAPIError(&resp.Diagnostics, "Error disabling data flow before retrying update", err2)
-				return
-			} else if opID != "" {
-				if !r.waitForOp(ctx, envID, opID, &resp.Diagnostics) {
-					return
-				}
-			}
-			deactivated = true
-			updated, err = r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
-		}
-		if err != nil {
-			addAPIError(&resp.Diagnostics, "Error updating data flow", err)
+	// The one genuine exception to "disable_river is never a defensive
+	// pre-step": CDC log-based rivers reject a `properties` change outright
+	// while CDC logging is enabled (_validate_locked_properties_for_active_
+	// river server-side, LOCKED_PROPERTIES_FOR_ACTIVE_RIVER = ['properties'])
+	// -- API error 400: "can not update properties for an active data flow.
+	// Please disable the data flow and try again".
+	//
+	// The guard's real predicate is is_river_cdc_enabled(...), which reads
+	// shared_params.enable_log -- a field entirely independent of
+	// river_status/activate. disable_river never touches it, so it's the
+	// wrong call here regardless of activation state: a river can be
+	// river_status=disabled and still have enable_log=true, and still 400 on
+	// this exact PUT. disable_cdc is what actually clears it.
+	//
+	// Called proactively (not reactively on the error) because, unlike
+	// state.Activate, extract_method is structural -- it's not something our
+	// own activate/deactivate calls flip mid-run, so there's no plan-time-
+	// vs-apply-time staleness risk the way there was for a wasActive check.
+	// disable_cdc also no-ops if CDC is already disabled, so calling it
+	// whenever this river IS CDC and properties is part of the diff is safe
+	// even when it turns out not to have been strictly necessary.
+	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
+	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
+	if isCurrentlyCDC && propertiesChanging {
+		resp.Diagnostics.Append(r.disableCDC(ctx, envID, plan.ID.ValueString())...)
+		if resp.Diagnostics.HasError() {
 			return
 		}
+	}
+
+	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
+	if err != nil {
+		addAPIError(&resp.Diagnostics, "Error updating data flow", err)
+		return
 	}
 	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -777,6 +774,23 @@ func (r *dataFlowResource) enableCDC(ctx context.Context, envID, id string) diag
 	return diags
 }
 
+// disableCDC clears shared_params.enable_log -- the field
+// _validate_locked_properties_for_active_river actually checks server-side,
+// independent of river_status/activate. Safe to call unconditionally: the
+// endpoint no-ops if CDC is already disabled.
+func (r *dataFlowResource) disableCDC(ctx context.Context, envID, id string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	opID, err := r.data.client.DisableCDCDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(&diags, "Error disabling CDC for data flow", err)
+		return diags
+	}
+	if opID != "" {
+		r.waitForOpWithTimeout(ctx, envID, opID, cdcEnableOpTimeout, &diags)
+	}
+	return diags
+}
+
 // isCDCFlow returns true when the properties_json selects log-based extraction.
 func isCDCFlow(propertiesJSON string) bool {
 	var props struct {
@@ -790,21 +804,6 @@ func isCDCFlow(propertiesJSON string) bool {
 		return false
 	}
 	return props.Source.AdditionalSettings.ExtractMethod == "log"
-}
-
-// isLockedPropertiesError reports whether err is the API's real-time
-// rejection of a properties change on an active CDC (log-based) river --
-// "can not update properties for an active data flow" -- as opposed to any
-// other 400/validation error. Matches on the server's literal detail text
-// rather than a structured error code because the API doesn't expose one for
-// this specific case.
-func isLockedPropertiesError(err error) bool {
-	var apiErr *client.APIError
-	if !errors.As(err, &apiErr) {
-		return false
-	}
-	return apiErr.StatusCode == http.StatusBadRequest &&
-		strings.Contains(apiErr.Details, "update properties for an active data flow")
 }
 
 // waitForOp polls an async operation until done ("D") or error/timeout.

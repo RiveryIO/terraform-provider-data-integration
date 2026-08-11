@@ -1141,6 +1141,25 @@ func (c *Client) EnableCDCDataFlow(ctx context.Context, environmentID, id string
 	return "", nil
 }
 
+// DisableCDCDataFlow calls the CDC-disable endpoint, which clears
+// shared_params.enable_log -- a field entirely independent of river_status
+// (DisableDataFlow/disable_river never touches it). This is the only thing
+// that actually unlocks a `properties` PUT on a currently-CDC-enabled river;
+// disable_river's 204 has no effect on this specific guard, active or not.
+// The endpoint no-ops (still returns cleanly) if CDC is already disabled, so
+// this is safe to call unconditionally. Returns the async operation id
+// (empty = synchronous).
+func (c *Client) DisableCDCDataFlow(ctx context.Context, environmentID, id string) (string, error) {
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPost, c.envPath(environmentID, "/rivers/"+id+"/disable_cdc"), nil, &out); err != nil {
+		return "", err
+	}
+	if op, ok := out["operation_id"].(string); ok {
+		return op, nil
+	}
+	return "", nil
+}
+
 // RunDataFlow triggers a run of a data flow, returning the first run id and the
 // run group id from the API's { runs: [{run_id,...}], run_group_id } response.
 func (c *Client) RunDataFlow(ctx context.Context, environmentID, id string) (runID, runGroupID string, err error) {

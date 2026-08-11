@@ -654,51 +654,36 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateRetriesAfterLockedCDCPropertiesError proves the narrow
-// exception CORE-2346 identified: unlike every other properties edit (see
-// TestDataFlowUpdateActivationTransitions's "unchanged and active" case,
-// which correctly sends no disable_river), a CDC (log-based) river that is
-// currently active rejects a `properties` change outright with a 400
+// TestDataFlowUpdateDisablesCDCBeforePropertiesChange proves the narrow
+// exception CORE-2346 identified: a CDC (log-based) river with CDC logging
+// currently enabled rejects a `properties` change outright with a 400
 // ("can not update properties for an active data flow. Please disable the
 // data flow and try again") — a real, unconditional server-side lock.
 //
-// This reacts to that specific error rather than trying to predict it from
-// plan/state ahead of time: state.Activate is a PLAN-TIME snapshot, and
-// Atlantis (like most plan/apply workflows) runs them as separate commands,
-// sometimes minutes apart — a real CDC river was observed flipping active
-// again in that exact window mid-session, which a proactive "was it active
-// in state" check reliably misses. So: try the PUT first: if the API
-// rejects it with this specific error, disable, retry the PUT, then
-// re-enable CDC and re-activate (since activate stays true throughout).
-//
-// UpdateDataFlow (client package) already retries the PUT itself up to 5
-// times on this exact error, on the assumption that a disable already
-// issued elsewhere just hasn't settled yet server-side. That doesn't help
-// here: nothing external ever disables this river, so every one of those 5
-// internal attempts must fail before the error ever reaches this function's
-// retry logic -- the mock below fails every PUT until disable_river has
-// actually been called, forcing the client's internal retries to exhaust for
-// real (this takes ~20s: 4 real 5-second sleeps between its 5 attempts).
-func TestDataFlowUpdateRetriesAfterLockedCDCPropertiesError(t *testing.T) {
+// The name of that error is misleading: the guard's real predicate is
+// is_river_cdc_enabled(...), which reads shared_params.enable_log -- a field
+// entirely independent of river_status/activate. disable_river never
+// touches it (confirmed against the backend source), so calling
+// disable_river/retrying alone does not reliably clear it. disable_cdc is
+// what actually clears it, and this is called proactively (not reactively on
+// the error) because, unlike state.Activate, extract_method is structural --
+// not something our own activate/deactivate calls flip mid-run the way
+// river_status is, so there's no plan-time-vs-apply-time staleness risk here
+// (see TestDataFlowUpdateSkipsDisableForLogicType's sibling test file
+// history for that staleness story on the *river_status* side).
+func TestDataFlowUpdateDisablesCDCBeforePropertiesChange(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
-	disabled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			disabled = true
-			w.WriteHeader(http.StatusNoContent)
-		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
+		case strings.HasSuffix(req.URL.Path, "/disable_cdc"),
+			strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
 			w.WriteHeader(http.StatusNoContent)
-		case req.Method == http.MethodPut && !disabled:
-			// The real API's live rejection: the river is active right now,
-			// regardless of what our plan-time snapshot believed, and nothing
-			// external is ever going to disable it in this test.
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"detail":"Error: can not update properties for an ` +
-				`active data flow. Please disable the data flow and try again"}`))
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			t.Errorf("disable_river does not clear enable_log and should not be called for this")
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
@@ -714,25 +699,24 @@ func TestDataFlowUpdateRetriesAfterLockedCDCPropertiesError(t *testing.T) {
 	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
 	s := dataFlowSchemaForTest(t)
 
-	// The plan-time snapshot (state) says inactive -- stale by the time apply
-	// actually runs, which is exactly the case this fix has to survive.
-	build := func(activate bool) tftypes.Value {
+	const cdcPropsV2 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":false}}}}`
+	build := func(props string) tftypes.Value {
 		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
 			"id":              tftypes.NewValue(tftypes.String, "river1"),
 			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
 			"name":            tftypes.NewValue(tftypes.String, "flow"),
 			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
-			"properties_json": tftypes.NewValue(tftypes.String, cdcProps),
+			"properties_json": tftypes.NewValue(tftypes.String, props),
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
 			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
-			"activate":        boolRaw(types.BoolValue(activate)),
+			"activate":        boolRaw(types.BoolValue(true)),
 			"status":          stringRaw(types.StringValue(riverStatusActive)),
 			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
 		})
 	}
-	planRaw := build(true)
-	stateRaw := build(true)
+	planRaw := build(cdcPropsV2)
+	stateRaw := build(cdcProps)
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
 	r.Update(ctx, resource.UpdateRequest{
@@ -741,39 +725,32 @@ func TestDataFlowUpdateRetriesAfterLockedCDCPropertiesError(t *testing.T) {
 	}, resp)
 
 	if resp.Diagnostics.HasError() {
-		t.Fatalf("unexpected diagnostics (fix should disable and retry, not surface the client's exhausted-retries error): %v", resp.Diagnostics)
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
-	if !disabled {
-		t.Error("disable_river was never called")
+	wantCalls := []string{
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_cdc",
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/enable_cdc",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/activate_river",
 	}
-	putCount := 0
-	for _, call := range calls {
-		if strings.HasPrefix(call, "PUT ") {
-			putCount++
-		}
-	}
-	// 5 internal attempts inside the first UpdateDataFlow call (all rejected,
-	// since disable_river hasn't happened yet) + at least 1 more once this
-	// function's own retry calls UpdateDataFlow again after disabling.
-	if putCount < 6 {
-		t.Errorf("PUT count = %d, want at least 6 (5 exhausted internal retries + a retry after disabling); calls: %v", putCount, calls)
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
 	}
 }
 
-// TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged proves the
-// other half of the same fix: since the retry only fires on the API's own
-// real 400, a CDC river update whose PUT the API actually accepts (e.g.
-// because properties isn't part of the diff, or the river happens to be
-// inactive) never calls disable_river at all — no proactive guesswork, no
-// unnecessary disable/re-enable round trip.
-func TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged(t *testing.T) {
+// TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged proves the other
+// half of the same fix: an update that doesn't touch `properties` at all
+// (e.g. renaming the flow) never calls disable_cdc — no unnecessary
+// disable/re-enable round trip interrupting CDC capture for no reason.
+func TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			t.Errorf("disable_river must not be called when properties is unchanged")
+		case strings.HasSuffix(req.URL.Path, "/disable_cdc"):
+			t.Errorf("disable_cdc must not be called when properties is unchanged")
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
@@ -821,8 +798,8 @@ func TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged(t *testing.T
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
 	for _, call := range calls {
-		if strings.Contains(call, "disable_river") {
-			t.Errorf("disable_river must not be called when properties is unchanged; got calls: %v", calls)
+		if strings.Contains(call, "disable_cdc") {
+			t.Errorf("disable_cdc must not be called when properties is unchanged; got calls: %v", calls)
 		}
 	}
 }
