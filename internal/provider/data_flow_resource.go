@@ -213,17 +213,7 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"schedulers_json": schema.StringAttribute{
-				Optional: true,
-				// Computed because the API can own this value even when config never sets
-				// it: CDC flows always carry a real scheduler (mandatory server-side), and
-				// enabling/disabling CDC deletes/recreates it as a side effect. Without
-				// Computed, an unset schedulers_json plans as a known null on every Update,
-				// and apply() backfilling the real (non-null) API value after the disable/
-				// enable-CDC round trip trips "provider produced inconsistent result after
-				// apply". Computed makes an unset value plan as Unknown on Update instead,
-				// which is allowed to differ freely after apply — matching the existing
-				// group_id/activate pattern in this file for server-owned optional fields.
-				Computed:   true,
+				Optional:   true,
 				CustomType: jsontypes.NormalizedType{},
 				DeprecationMessage: "Use the typed `schedule` block instead — it mirrors the API's " +
 					"RiverSchedule schema and is singular because the API permits at most one " +
@@ -1141,18 +1131,11 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
-	// schedulers_json is Optional (not Computed), so an unset config is null. Only
-	// seed it from the API when it is null AND the data flow actually carries a
-	// scheduler — i.e. on import. Never populate from an empty API list, which
-	// would turn a legitimately-null config into "[]" and break plan==apply
-	// consistency on create.
-	if m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown() {
-		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
-			if raw, err := json.Marshal(schedulers); err == nil {
-				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))
-			}
-		}
-	}
+	// schedulers_json is Optional (not Computed) and config-authoritative, same
+	// as properties_json/settings_json: never synced back from the API. The
+	// actual live scheduler surviving a disable/re-enable-CDC round trip is
+	// handled separately and unconditionally by ensureSchedulersInBody, so
+	// nothing here needs to mirror it into Terraform state.
 	return diags
 }
 
