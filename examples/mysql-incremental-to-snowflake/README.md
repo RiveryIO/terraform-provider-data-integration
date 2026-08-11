@@ -200,10 +200,20 @@ terraform init
 terraform plan
 ```
 
-Both connections have a `boomi_data_integration_connection_test` attached with a
-`postcondition`, so `apply` fails immediately and by name if either one can't be
+The MySQL source has a `boomi_data_integration_connection_test` attached with a
+`postcondition`, so `apply` fails immediately and by name if it can't be
 reached — rather than applying cleanly and leaving you to discover it minutes
 later when the first run dies on a connect timeout.
+
+The Snowflake target is checked differently. `connection_test` defaults to
+`task_type = "source"`, and the API rejects a warehouse connection tested that
+way (`400 "The connection does not match to the provided connection_type"`) —
+and because that's a hard error rather than `success = false`, a `postcondition`
+on `self.success` would never even get to run. Warehouse targets are checked
+with `boomi_data_integration_target_metadata` instead: it discovers the live
+list of databases (the same call the console's target picker makes) and the
+example's own `postcondition` confirms `var.snowflake_database` is actually one
+of them.
 
 If the MySQL test fails against a host you *can* reach from your own machine,
 read the SSH-tunnel section of the Connections guide before changing anything

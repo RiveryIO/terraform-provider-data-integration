@@ -25,6 +25,24 @@ with a `postcondition` — see the example below.
 
 {{ tffile "examples/data-sources/boomi_data_integration_connection_test/data-source.tf" }}
 
+## Testing a warehouse TARGET: use `target_metadata`, not this data source
+
+`task_type` defaults to `"source"` — this tests whether the connection can be **pulled from**, not
+whether it can be **pushed to**. For a data-warehouse connection used as a data flow's target
+(Snowflake, BigQuery, Databricks), that default is wrong: the API rejects a warehouse connection
+tested as a source with `400 "The connection does not match to the provided connection_type"`.
+
+That failure is a hard provider error, **not** `success = false` — so a `postcondition` on
+`self.success` never even runs, `error_message` stays empty, and the misleading 400 is all you see.
+
+Use [`boomi_data_integration_target_metadata`](./data_integration_target_metadata) to check a
+warehouse target instead. It sends the correct `task_type = "target"` request and doubles as a
+reachability check plus a live list of the warehouse's databases/datasets/catalogs.
+
+If you set `task_type = "target"` here directly anyway, only the warehouse's own listing verb is
+accepted (e.g. `get_databases` for Snowflake) — `task = "get_db_metadata"` (the default) is rejected
+with a `422 "did not match any key in the pull-translate mapping for this datasource_id"`.
+
 ## This is a live network call, and it can run during `plan`
 
 Reading this data source opens a real connection from the platform to your
