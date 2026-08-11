@@ -78,16 +78,24 @@ resource "boomi_data_integration_connection" "snowflake_keypair" {
   type = "snowflake"
 
   parameters_json = jsonencode({
-    account  = "xy12345.us-east-1"
-    username = "SVC_USER"
-    database = "ANALYTICS"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    default_database_name = "ANALYTICS"
+    authentication_type   = "key_pair"
   })
 
   file_params = {
-    private_key_file_path = "${path.module}/keys/snowflake_rsa_key.p8"
+    key_file_path = "${path.module}/keys/snowflake_rsa_key.p8"
   }
 }
 ```
+
+Note the property names above are the ones the **API** uses, taken from
+`GET /v1/connections_types/snowflake` — `account_name`, not `account`;
+`default_database_name`, not `database`; and the key-pair upload key is
+`key_file_path`, not `private_key_file_path`. Snowflake's own console labels
+differ from all three. Always confirm against the `connection_type` data
+source above rather than transcribing names from a vendor UI.
 
 - `file_params` — map of property name → **local file path**. The provider
   uploads the file's current contents and substitutes the server-assigned
@@ -96,8 +104,9 @@ resource "boomi_data_integration_connection" "snowflake_keypair" {
   already in memory — e.g. from an ephemeral resource — never written to
   local disk). Write-only, never stored in state. Use this instead of
   `file_params` when the key material shouldn't touch the filesystem at all.
-- `file_params_content_filenames` — overrides the filename recorded for a
-  `file_params_content` entry (some connection types validate the extension).
+- `file_params_content_filenames` — the filename recorded for a
+  `file_params_content` entry. **Set this for every `file_params_content`
+  entry.** See the warning below.
 - The deprecated `ssh_pkey_file`/`ssh_pkey_file_path` attributes predate
   `file_params` and should not be used in new configurations — use
   `file_params = { ssh_pkey_file_path = "<local path>" }` instead.
@@ -105,6 +114,59 @@ resource "boomi_data_integration_connection" "snowflake_keypair" {
 Whichever map you use, do not also set that same property inside
 `parameters_json` — the provider merges the uploaded path into the request
 body under that exact key, so setting it in both places conflicts.
+
+!> **Always pair `file_params_content` with `file_params_content_filenames`.**
+The API validates uploads by file extension. When you omit the filename, the
+upload is named after the *field* — which has no extension — and the API
+rejects it with a message that blames the connector instead of the missing
+filename:
+>
+> `API error 400: "File with extension ssh_pkey_file_path is not supported for connection type mysql"`
+>
+> That reads like "mysql doesn't support this field", which sends you looking
+> in the wrong place entirely. The actual fix is one line:
+
+```hcl
+file_params_content = {
+  ssh_pkey_file_path = local.ssh_private_key # from an ephemeral resource
+}
+file_params_content_filenames = {
+  ssh_pkey_file_path = "ssh_key.pem" # ← the extension is what gets validated
+}
+```
+
+Use the extension the connector's schema calls for — `.p8` for Snowflake's
+`key_file_path`, `.json` for a GCS/BigQuery service-account file, `.pem` for
+an SSH private key. `GET /v1/connections_types/{type}` reports the expected
+`file_type` per field.
+
+## Updating a connection: write-only attributes don't produce a diff on their own
+
+`parameters_json` and `file_params_content` are
+[write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) —
+their values are never stored in state, which is what keeps credentials out
+of it. The trade-off: Terraform has no prior value to compare against, so
+**changing only a write-only attribute may not register as a change at all.**
+
+If you edit `parameters_json` (say, to add SSH-tunnel fields to an existing
+connection) and leave `name`, `type`, and every other ordinary attribute
+untouched, `terraform plan` can report:
+
+```
+No changes. Your infrastructure matches the configuration.
+```
+
+The API is never called and the connection keeps its old parameters. Two ways
+to force the update through:
+
+```bash
+# Option A — targeted replace (no config edit needed)
+terraform apply -replace=boomi_data_integration_connection.mysql_source
+```
+
+Option B — change an ordinary attribute in the same commit, so the resource
+has a real diff to apply (for example, append a note to `name`). This is
+worth knowing before you conclude that a credential change "didn't take".
 
 ## Linking a connection to a file zone
 

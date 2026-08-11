@@ -28,12 +28,12 @@ resource "boomi_data_integration_connection" "snowflake" {
   type = "snowflake"
 
   parameters_json = jsonencode({
-    account   = "xy12345.us-east-1"
-    username  = "SVC_USER"
-    password  = "..."
-    database  = "ANALYTICS"
-    warehouse = "COMPUTE_WH"
-    schema    = "PUBLIC"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    password              = "..."
+    default_database_name = "ANALYTICS"
+    warehouse             = "COMPUTE_WH"
+    default_schema_name   = "PUBLIC"
   })
 }
 
@@ -49,37 +49,27 @@ resource "boomi_data_integration_data_flow" "jira_issues_full" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name                = "jira"
-      connection_id       = boomi_data_integration_connection.jira.id
-      run_type            = "single_table"
-      cdc_settings        = null
-      additional_settings = { source_type = "source_to_target" }
+      name          = "jira"
+      connection_id = boomi_data_integration_connection.jira.id
+      run_type      = "predefined_report"
+      cdc_settings  = null
     }
     target = {
-      name          = "snowflake"
-      connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = "PUBLIC"
-      db            = "ANALYTICS"
+      name           = "snowflake"
+      connection_id  = boomi_data_integration_connection.snowflake.id
+      loading_method = "overwrite"
+      database_name  = "ANALYTICS"
+      schema_name    = "PUBLIC"
     }
     schemas = [{
       name = "no_schema"
       tables = [{
-        run_type_and_datasource = "single_table"
+        run_type_and_datasource = "predefined_report"
         details = {
-          name                       = "issues"
+          table_name                 = "issues"
           target_table               = "jira_issues"
           is_selected                = true
-          is_custom_incremental      = false
-          exporter_chunk_size        = 30000
-          modified_columns           = []
-          incremental_field          = null
-          date_range                 = null
-          running_number             = null
-          epoch                      = null
-          change_tracking_settings   = null
-          system_versioning_settings = null
-          additional_target_settings = null
-          cdc_settings               = { initiate_table = null, overwrite_table_in_migration = null }
+          extract_method             = "all"
           additional_source_settings = { report_type = "full_table" }
         }
       }]
@@ -99,37 +89,27 @@ resource "boomi_data_integration_data_flow" "jira_issues_weekly" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name                = "jira"
-      connection_id       = boomi_data_integration_connection.jira.id
-      run_type            = "single_table"
-      cdc_settings        = null
-      additional_settings = { source_type = "source_to_target" }
+      name          = "jira"
+      connection_id = boomi_data_integration_connection.jira.id
+      run_type      = "predefined_report"
+      cdc_settings  = null
     }
     target = {
-      name          = "snowflake"
-      connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = "PUBLIC"
-      db            = "ANALYTICS"
+      name           = "snowflake"
+      connection_id  = boomi_data_integration_connection.snowflake.id
+      loading_method = "overwrite"
+      database_name  = "ANALYTICS"
+      schema_name    = "PUBLIC"
     }
     schemas = [{
       name = "no_schema"
       tables = [{
-        run_type_and_datasource = "single_table"
+        run_type_and_datasource = "predefined_report"
         details = {
-          name                       = "issues"
+          table_name                 = "issues"
           target_table               = "jira_issues_weekly"
           is_selected                = true
-          is_custom_incremental      = false
-          exporter_chunk_size        = 30000
-          modified_columns           = []
-          incremental_field          = null
-          date_range                 = null
-          running_number             = null
-          epoch                      = null
-          change_tracking_settings   = null
-          system_versioning_settings = null
-          additional_target_settings = null
-          cdc_settings               = { initiate_table = null, overwrite_table_in_migration = null }
+          extract_method             = "all"
           additional_source_settings = { report_type = "predefined", time_period = "week_to_date" }
         }
       }]

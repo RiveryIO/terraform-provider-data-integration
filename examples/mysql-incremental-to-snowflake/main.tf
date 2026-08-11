@@ -31,13 +31,13 @@ resource "boomi_data_integration_connection" "mysql_source" {
   type           = "mysql"
 
   parameters_json = jsonencode({
-    host            = var.mysql_host
-    port            = var.mysql_port
-    username        = var.mysql_username
-    password        = var.mysql_password
-    database        = var.mysql_database
-    ssl_mode        = var.mysql_ssl_mode
-    connection_desc = "MySQL incremental source, managed by terraform"
+    host                  = var.mysql_host
+    port                  = var.mysql_port
+    username              = var.mysql_username
+    password              = var.mysql_password
+    default_database_name = var.mysql_database
+    ssl_mode              = var.mysql_ssl_mode
+    connection_desc       = "MySQL incremental source, managed by terraform"
   })
 }
 
@@ -51,13 +51,13 @@ resource "boomi_data_integration_connection" "snowflake_target" {
   type           = "snowflake"
 
   parameters_json = jsonencode({
-    account_name    = var.snowflake_account_name
-    username        = var.snowflake_username
-    password        = var.snowflake_password
-    warehouse       = var.snowflake_warehouse
-    role            = var.snowflake_role
-    database        = var.snowflake_database
-    connection_desc = "Snowflake incremental target, managed by terraform"
+    account_name          = var.snowflake_account_name
+    username              = var.snowflake_username
+    password              = var.snowflake_password
+    warehouse             = var.snowflake_warehouse
+    role                  = var.snowflake_role
+    default_database_name = var.snowflake_database
+    connection_desc       = "Snowflake incremental target, managed by terraform"
   })
 }
 

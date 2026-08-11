@@ -20,14 +20,14 @@ shows the required dropdowns empty and a run has no scope.
 
 ## 1. Recognise a connector that needs them
 
-- Its `data_source_types` entry has `is_native = true` and
-  `feature_flags.run_types = ["multi_tables"]`. (`is_native` is a literal field name on that
-  catalog — read it, do not interpret it.)
 - In `properties_json` its source is written as the literal `name = "native_connector"`, with
   `additional_settings.nc_id` / `additional_settings.nc_version` set. These are the exact strings the
   API accepts; the connector you actually configure is identified by `nc_id`, not by `name`.
 
-The `boomi_data_integration_source_types` data source lists the available source types.
+The `boomi_data_integration_source_types` data source lists the available source types. Note it
+exposes exactly six fields per entry — `id`, `name`, `connection_type`, `status`, `section_id`,
+`documentation_url` — so it cannot tell you on its own whether a connector is native or which run
+types it supports; the `name = "native_connector"` marker above is the reliable signal.
 
 ## 2. Discover which settings are mandatory
 

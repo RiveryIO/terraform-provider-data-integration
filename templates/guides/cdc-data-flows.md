@@ -26,7 +26,7 @@ Use when the target table is empty and you need historical data loaded first:
 
 ```hcl
 details = {
-  table_status = "new_table"
+  table_status = "waiting_for_migration"
   cdc_settings = {
     initiate_table               = true   # run snapshot before streaming
     overwrite_table_in_migration = false

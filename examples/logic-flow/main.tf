@@ -26,12 +26,12 @@ resource "boomi_data_integration_connection" "snowflake" {
   type           = "snowflake"
 
   parameters_json = jsonencode({
-    account_name = var.sf_account_name
-    username     = var.sf_username
-    password     = var.sf_password
-    warehouse    = var.sf_warehouse
-    role         = var.sf_role
-    database     = var.sf_target_database
+    account_name          = var.sf_account_name
+    username              = var.sf_username
+    password              = var.sf_password
+    warehouse             = var.sf_warehouse
+    role                  = var.sf_role
+    default_database_name = var.sf_target_database
   })
 }
 

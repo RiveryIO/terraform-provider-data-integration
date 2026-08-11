@@ -46,17 +46,25 @@ Two things have to be true for `merge` to work:
    This is the column the merge matches existing rows on.
 2. **`merge_method`**, naming the actual merge strategy:
 
-| Target family | Accepted `merge_method` values |
+   The accepted values are **per target**, not one shared list:
+
+| Target | Accepted `merge_method` values |
 | --- | --- |
-| Snowflake | `switch_tables`, `delete_insert`, `merge` |
-| Other database targets (BigQuery, Redshift, Databricks, Azure Synapse/SQL, PostgreSQL, Athena) | `insert_on_conflict` |
+| Snowflake, OneLake | `switch_tables`, `delete_insert`, `merge` |
+| BigQuery, Redshift, Databricks, Azure SQL | `switch_tables`, `delete_insert`, `merge`, `insert_on_conflict` |
+| PostgreSQL | `delete_insert`, `insert_on_conflict` |
+| Athena, Azure Synapse Analytics | *(no `merge_method` field — do not set it)* |
+
+`insert_on_conflict` is **not** accepted by Snowflake, and it is the only
+non-`delete_insert` option PostgreSQL takes — so a `merge_method` copied from
+one target to another is a common source of validation errors.
 
 ```hcl
 target = {
   name           = "postgres_rds"
   connection_id  = boomi_data_integration_connection.pg.id
   loading_method = "merge"
-  merge_method   = "insert_on_conflict"
+  merge_method   = "insert_on_conflict" # valid for PostgreSQL; rejected by Snowflake
 }
 ```
 

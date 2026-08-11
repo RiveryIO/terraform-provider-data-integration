@@ -16,13 +16,19 @@ resource "boomi_data_integration_connection" "example" {
   name = "Snowflake"
   type = "snowflake"
 
+  # Field names come from the live catalog for this connection type:
+  #   GET /v1/connections_types/snowflake
+  # (or the boomi_data_integration_connection_type data source). They do not
+  # match the Snowflake console's own labels — it is account_name, not
+  # account, and default_database_name / default_schema_name, not
+  # database / schema.
   parameters_json = jsonencode({
-    account   = "xy12345.us-east-1"
-    username  = "SVC_USER"
-    password  = "..."
-    database  = "ANALYTICS"
-    warehouse = "COMPUTE_WH"
-    schema    = "PUBLIC"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    password              = "..."
+    default_database_name = "ANALYTICS"
+    warehouse             = "COMPUTE_WH"
+    default_schema_name   = "PUBLIC"
   })
 }
 ```
@@ -42,7 +48,7 @@ resource "boomi_data_integration_connection" "example" {
 - `environment_id` (String) Environment this connection belongs to. Falls back to the provider-level environment_id. Changing it forces a new connection.
 - `file_params` (Map of String, Sensitive) Map of connection-body field name → local file path. For each entry the provider uploads the file via the connection-files API and injects the returned server-side path into the connection body under that field name. Use this for any credential file: Snowflake P8 keys, GCS/BQ service-account JSON, SSH keys, etc. The uploaded paths are stored in file_param_paths. Write-only: local paths are never stored in state.
 - `file_params_content` (Map of String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Map of connection-body field name → raw file content, uploaded via the connection-files API the same way as file_params, but the content is never written to local disk. Write-only, so — unlike file_params, which takes a local path and is only Sensitive — this accepts values derived from an ephemeral resource directly (e.g. an `ephemeral "aws_secretsmanager_secret_version"` private key), keeping the secret out of both local disk and Terraform state. Use this instead of file_params whenever the credential file's content comes from an ephemeral source.
-- `file_params_content_filenames` (Map of String) Map of connection-body field name → upload filename, for entries in file_params_content whose target API validates the file by extension (e.g. Snowflake's key_file_path requires a ".p8" filename — check GET /v1/connections_types/{type} for the expected extension). Not sensitive: only a filename, never file content. Defaults to the field name itself (no extension) when omitted, which is fine for extension-insensitive fields.
+- `file_params_content_filenames` (Map of String) Map of connection-body field name → upload filename. Set an entry here for every entry in file_params_content: the API validates uploads by file extension (e.g. Snowflake's key_file_path requires a ".p8" filename, an SSH private key a ".pem" — check GET /v1/connections_types/{type} for the expected file_type). When omitted, the upload is named after the field itself, which has no extension, and the API rejects it with an error naming the connection type rather than the missing filename, e.g. `File with extension ssh_pkey_file_path is not supported for connection type mysql`. Not sensitive: only a filename, never file content.
 - `fz_connection_id` (String) Cross-ID of the file-zone staging connection linked to this connection.
 - `parameters_json` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Connection-type-specific parameters as a JSON object, including credentials. Write-only: never stored in state. The API omits secrets on read, so drift detection for credentials is not possible.
 - `ssh_pkey_file` (String, Sensitive, Deprecated) Deprecated: use file_params. Local path to a PEM private-key file for SSH tunnel authentication. Uploads via the connection-files API and stores the server-side path in ssh_pkey_file_path.

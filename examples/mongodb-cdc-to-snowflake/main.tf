@@ -20,12 +20,12 @@ resource "boomi_data_integration_connection" "snowflake" {
   type = "snowflake"
 
   parameters_json = jsonencode({
-    account   = "xy12345.us-east-1"
-    username  = "SVC_USER"
-    password  = "..."
-    database  = "ANALYTICS"
-    warehouse = "COMPUTE_WH"
-    schema    = "PUBLIC"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    password              = "..."
+    default_database_name = "ANALYTICS"
+    warehouse             = "COMPUTE_WH"
+    default_schema_name   = "PUBLIC"
   })
 }
 
@@ -64,7 +64,7 @@ resource "boomi_data_integration_data_flow" "mongodb_cdc" {
           target_table   = "orders"
           is_selected    = true
           extract_method = "log"
-          table_status   = "new_table"
+          table_status   = "waiting_for_migration"
           cdc_settings = {
             initiate_table               = true
             overwrite_table_in_migration = false

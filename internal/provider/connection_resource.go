@@ -138,12 +138,14 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"file_params_content_filenames": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Map of connection-body field name → upload filename, for entries in " +
-					"file_params_content whose target API validates the file by extension (e.g. Snowflake's " +
-					"key_file_path requires a \".p8\" filename — check GET /v1/connections_types/{type} for " +
-					"the expected extension). Not sensitive: only a filename, never file content. Defaults " +
-					"to the field name itself (no extension) when omitted, which is fine for extension-" +
-					"insensitive fields.",
+				Description: "Map of connection-body field name → upload filename. Set an entry here for " +
+					"every entry in file_params_content: the API validates uploads by file extension (e.g. " +
+					"Snowflake's key_file_path requires a \".p8\" filename, an SSH private key a \".pem\" — " +
+					"check GET /v1/connections_types/{type} for the expected file_type). When omitted, the " +
+					"upload is named after the field itself, which has no extension, and the API rejects it " +
+					"with an error naming the connection type rather than the missing filename, e.g. `File " +
+					"with extension ssh_pkey_file_path is not supported for connection type mysql`. Not " +
+					"sensitive: only a filename, never file content.",
 			},
 			"file_param_paths": schema.MapAttribute{
 				Computed:    true,

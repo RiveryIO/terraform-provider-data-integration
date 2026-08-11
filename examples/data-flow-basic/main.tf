@@ -16,13 +16,15 @@ resource "boomi_data_integration_connection" "snowflake" {
   name = "Snowflake"
   type = "snowflake"
 
+  # Property names come from GET /v1/connections_types/snowflake — account_name
+  # and default_database_name, not the console's "account"/"database" labels.
   parameters_json = jsonencode({
-    account   = "xy12345.us-east-1"
-    username  = "SVC_USER"
-    password  = "..."
-    database  = "ANALYTICS"
-    warehouse = "COMPUTE_WH"
-    schema    = "PUBLIC"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    password              = "..."
+    default_database_name = "ANALYTICS"
+    warehouse             = "COMPUTE_WH"
+    default_schema_name   = "PUBLIC"
   })
 }
 
@@ -35,37 +37,33 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
   properties_json = jsonencode({
     properties_type = "source_to_target"
     source = {
-      name                = "jira"
-      connection_id       = boomi_data_integration_connection.jira.id
-      run_type            = "regular"
-      cdc_settings        = null
-      additional_settings = { source_type = "source_to_target" }
+      name          = "jira"
+      connection_id = boomi_data_integration_connection.jira.id
+      # Jira exposes predefined reports rather than raw tables, so both the
+      # source run_type and each table's run_type_and_datasource below are
+      # "predefined_report". For an RDBMS source these would be "multi_tables".
+      run_type     = "predefined_report"
+      cdc_settings = null
     }
     target = {
       name          = "snowflake"
       connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = "PUBLIC"
-      db            = "ANALYTICS"
+      # loading_method is REQUIRED on every target.
+      loading_method = "overwrite"
+      database_name  = "ANALYTICS"
+      schema_name    = "PUBLIC"
     }
     schemas = [{
       name = "no_schema"
       tables = [{
-        run_type_and_datasource = "single_table"
+        # Only "multi_tables" and "predefined_report" are accepted here — this
+        # field is the discriminator that selects the table schema.
+        run_type_and_datasource = "predefined_report"
         details = {
-          name                       = "issues"
+          table_name                 = "issues"
           target_table               = "jira_issues"
           is_selected                = true
-          is_custom_incremental      = false
-          exporter_chunk_size        = 30000
-          modified_columns           = []
-          incremental_field          = null
-          date_range                 = null
-          running_number             = null
-          epoch                      = null
-          change_tracking_settings   = null
-          system_versioning_settings = null
-          additional_target_settings = null
-          cdc_settings               = { initiate_table = null, overwrite_table_in_migration = null }
+          extract_method             = "all"
           additional_source_settings = { report_type = "full_table" }
         }
       }]
