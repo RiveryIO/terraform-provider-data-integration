@@ -200,10 +200,41 @@ terraform init
 terraform plan
 ```
 
+Both connections have a `boomi_data_integration_connection_test` attached with a
+`postcondition`, so `apply` fails immediately and by name if either one can't be
+reached — rather than applying cleanly and leaving you to discover it minutes
+later when the first run dies on a connect timeout.
+
+If the MySQL test fails against a host you *can* reach from your own machine,
+read the SSH-tunnel section of the Connections guide before changing anything
+else: runs execute on the platform's worker fleet, which egresses from different
+addresses than your laptop, so local reachability proves nothing.
+
 The `discovered_incremental_mapping` output exists so you can eyeball what
 discovery produced — the exact `schemas[]` block, with merge keys stamped on —
 before you trust it. Diff it against `local.hand_written_schemas` to see how the
 two routes differ.
+
+### Triggering a run
+
+Terraform creates and activates; it does not run. `run.py` here triggers a run
+and polls it to a terminal status — standard library only, exits non-zero on a
+failed run so it works in CI unchanged:
+
+```bash
+export BOOMI_API_URL=https://api.rivery.io
+export BOOMI_ACCOUNT_ID=<account id>
+export BOOMI_ENVIRONMENT_ID=<environment id>
+export BOOMI_DATA_FLOW_ID=$(terraform output -raw discovery_driven_data_flow_id)
+export BOOMI_API_TOKEN=<token>
+
+python3 run.py
+```
+
+A `succeeded` run means the platform reported success, not that the rows you
+expected are in Snowflake. For a real end-to-end check, query the target
+directly and assert on row counts. See the "Running data flows" guide for the
+endpoints and the full status table.
 
 Credentials are variables only — `mysql_password` and `snowflake_password` are
 marked `sensitive`, and `parameters_json` is write-only, so neither reaches state.

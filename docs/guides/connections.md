@@ -140,6 +140,88 @@ Use the extension the connector's schema calls for — `.p8` for Snowflake's
 an SSH private key. `GET /v1/connections_types/{type}` reports the expected
 `file_type` per field.
 
+## Reaching a database through an SSH tunnel
+
+Databases that aren't publicly routable — or that only allow a bastion host —
+are reached through an SSH tunnel. This is configured entirely inside
+`parameters_json`, plus the private key as a file upload.
+
+!> **The tunnel fields are not listed by
+`GET /v1/connections_types/{type}`, and therefore not by the
+`boomi_data_integration_connection_type` data source either.** Everywhere else
+in this guide that catalog is authoritative for what `parameters_json` accepts.
+For the SSH-tunnel path it is not — the fields below are real and accepted, but
+you cannot discover them from it. This section is the reference.
+
+```hcl
+resource "boomi_data_integration_connection" "mysql_tunneled" {
+  environment_id = var.environment_id
+  name           = "MySQL via bastion"
+  type           = "mysql"
+
+  parameters_json = jsonencode({
+    # The database, addressed as the BASTION sees it — usually a private
+    # address or internal DNS name, not one you can reach yourself.
+    host     = "db.internal"
+    port     = 3306
+    database = "app"
+    username = "readonly"
+    password = var.mysql_password
+
+    # The tunnel itself.
+    is_ssh_tunnel   = true
+    ssh_remote_host = "bastion.example.com" # the jump host
+    ssh_remote_port = 22
+    ssh_remote_user = "tunnel_user"
+  })
+
+  # The SSH private key. file_params_content keeps it off local disk and out
+  # of state; the .pem filename is required (see the warning above).
+  file_params_content = {
+    ssh_pkey_file_path = var.ssh_private_key
+  }
+  file_params_content_filenames = {
+    ssh_pkey_file_path = "ssh_key.pem"
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `is_ssh_tunnel` | `true` turns the tunnel on. Absent or `false` means a direct connection. |
+| `ssh_remote_host` | The bastion/jump host to connect through — **not** the database. |
+| `ssh_remote_port` | The bastion's SSH port, usually `22`. |
+| `ssh_remote_user` | The SSH user on the bastion. |
+| `ssh_pkey_file_path` | Key for the bastion, via `file_params` or `file_params_content`. Not the database password. |
+
+`host`/`port` stay the **database's** address as resolved from the bastion.
+A common mistake is pointing `host` at the bastion; the bastion goes in
+`ssh_remote_host` and nowhere else.
+
+### Deciding whether you need one
+
+The trap: **a database being reachable from your machine tells you nothing
+about whether the platform can reach it.** Runs execute on the platform's
+worker fleet, which egresses from entirely different addresses than your
+laptop or CI runner. A source whose firewall allows your office range but only
+the bastion otherwise will connect perfectly from `mysql` on your terminal and
+fail from every run.
+
+Symptoms of a missing tunnel, in the order you'll meet them:
+
+- `boomi_data_integration_connection_test` returns `success = false` with a
+  connect-timeout error — **this is the cheap one**, which is why the test is
+  worth attaching to every connection.
+- Without that test: the flow applies and activates cleanly, then every run
+  sits in `running` and dies on the platform's watchdog, reporting a connect
+  timeout (`[Errno 110]` for MySQL/Postgres) with nothing indicating the
+  connection was the cause.
+
+If you have a working connection to the same host made outside Terraform —
+through the console, or by another team — inspect it and copy its tunnel
+settings rather than deriving them. Whoever set it up already discovered
+which bastion the host expects.
+
 ## Updating a connection: write-only attributes don't produce a diff on their own
 
 `parameters_json` and `file_params_content` are
