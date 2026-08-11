@@ -455,10 +455,13 @@ func TestDataFlowUpdateActivationTransitions(t *testing.T) {
 			// Activating a data flow that is already CDC does not go through the
 			// switch-to-CDC path, so enable_cdc has to be driven from here too —
 			// otherwise "create disabled, activate later" silently skips it.
+			// No disable_river here: the flow is already inactive (wasActive=false),
+			// so there's nothing to deactivate — disable_river is only for
+			// realizing a true -> false transition, never a defensive pre-step
+			// (CORE-2346: PUT has no general "must be inactive" requirement).
 			name:  "false -> true on a CDC flow enables CDC before activating",
 			props: cdcProps, planActivate: types.BoolValue(true), stateActivate: false,
 			wantCalls: []string{
-				"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
 				"GET /v1/accounts/acc/environments/env1/rivers/river1",
 				"PUT /v1/accounts/acc/environments/env1/rivers/river1",
 				"POST /v1/accounts/acc/environments/env1/rivers/river1/enable_cdc",
@@ -474,6 +477,19 @@ func TestDataFlowUpdateActivationTransitions(t *testing.T) {
 				"PUT /v1/accounts/acc/environments/env1/rivers/river1",
 			},
 			wantStatus: types.StringValue("disabled"),
+		},
+		{
+			// The case this whole fix is about: editing an already-active flow's
+			// content, with activate staying true, must not disable it first —
+			// that was pure defensive overhead the real API never required.
+			name:  "unchanged and active (a content edit) touches no disable endpoint",
+			props: batchProps, planActivate: types.BoolValue(true), stateActivate: true,
+			wantCalls: []string{
+				"GET /v1/accounts/acc/environments/env1/rivers/river1",
+				"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+				"POST /v1/accounts/acc/environments/env1/rivers/river1/activate_river",
+			},
+			wantStatus: types.StringValue("active"),
 		},
 	}
 
@@ -537,6 +553,102 @@ func TestDataFlowUpdateActivationTransitions(t *testing.T) {
 			resp.State.GetAttribute(ctx, path.Root("activate"), &gotActivate)
 			if !gotActivate.Equal(tc.planActivate) {
 				t.Errorf("state activate = %v, want the planned %v", gotActivate, tc.planActivate)
+			}
+		})
+	}
+}
+
+// TestDataFlowUpdateSkipsDisableForLogicType proves the CORE-2346 fix: the
+// real API rejects disable_river outright for type="logic" (400:
+// "disable_river is not supported for logic river types") because logic
+// rivers are hardcoded server-side to always be ACTIVE — there is no
+// DISABLED state for this type to transition into. Every OTHER type still
+// calls disable_river for a genuine active -> inactive request (see
+// TestDataFlowUpdateActivationTransitions's "true -> false" case); logic
+// never does, not even then, since that call would always 400.
+func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
+	const logicProps = `{"properties_type":"logic","logic_steps":[]}`
+
+	cases := []struct {
+		name          string
+		planActivate  bool
+		stateActivate bool
+	}{
+		// The case that unconditionally hit disable_river pre-fix (the
+		// original guard was `wantActive || wasActive`, not gated on an
+		// actual activate transition): a content edit with activate
+		// staying true.
+		{"active staying active (a content edit)", true, true},
+		// The one case that's STILL special about logic even after the
+		// general fix (CORE-2346): every other type calls disable_river
+		// for a genuine active -> inactive request (see
+		// TestDataFlowUpdateActivationTransitions's "true -> false"), but
+		// logic never does — that call would always 400, since logic
+		// rivers have no DISABLED state to transition into.
+		{"attempted true -> false", false, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			var calls []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				calls = append(calls, req.Method+" "+req.URL.Path)
+				switch {
+				case strings.HasSuffix(req.URL.Path, "/disable_river"):
+					// Real behavior being guarded against: this must never be
+					// called for type="logic". If it is, fail the way the real
+					// API does.
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"detail":"disable_river is not supported for logic river types."}`))
+				case strings.HasSuffix(req.URL.Path, "/activate_river"):
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+						`"type":"logic","metadata":{"river_status":"active"}}`))
+				}
+			}))
+			defer srv.Close()
+
+			c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+			if err != nil {
+				t.Fatalf("client.New: %v", err)
+			}
+			r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+			s := dataFlowSchemaForTest(t)
+
+			build := func(activate bool) tftypes.Value {
+				return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+					"id":              tftypes.NewValue(tftypes.String, "river1"),
+					"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+					"name":            tftypes.NewValue(tftypes.String, "flow"),
+					"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+					"type":            tftypes.NewValue(tftypes.String, "logic"),
+					"properties_json": tftypes.NewValue(tftypes.String, logicProps),
+					"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+					"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+					"activate":        boolRaw(types.BoolValue(activate)),
+					"status":          stringRaw(types.StringValue(riverStatusActive)),
+					"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+				})
+			}
+			planRaw := build(tc.planActivate)
+			stateRaw := build(tc.stateActivate)
+
+			resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+			r.Update(ctx, resource.UpdateRequest{
+				Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+				State: tfsdk.State{Raw: stateRaw, Schema: s},
+			}, resp)
+
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+			}
+			for _, call := range calls {
+				if strings.Contains(call, "disable_river") {
+					t.Errorf("disable_river must never be called for type=logic; got calls: %v", calls)
+				}
 			}
 		})
 	}
