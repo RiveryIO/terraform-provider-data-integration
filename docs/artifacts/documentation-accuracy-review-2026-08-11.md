@@ -108,6 +108,16 @@ Four separate problems stacked in one ~20-line block:
 
 ---
 
+## Operational recommendation: always chain `connection_test` immediately after creating a connection
+
+Not a doc-accuracy bug, but a real incident from this same review session worth folding into the docs: a `boomi_data_integration_connection` (type `mysql`) was created and its `source_to_target` data flow activated with zero errors from `terraform apply` — but every triggered run timed out after the platform's 10-minute watchdog (`RVR-TIMEOUT-400`). Root cause, found only after a full DB-level investigation: the host required a specific SSH-tunnel bastion (`rivery-ssh-tunnel.demo.rivery.in`) that every other connection to this same host in Rivery's history uses, which this config omitted. The host was directly reachable from a developer machine, so nothing about the connection *looked* wrong — it just wasn't reachable from the worker fleet's actual network path. `terraform plan`/`apply` had no way to catch this; only a full run-and-wait cycle surfaced it, and even then only as a generic timeout with no root cause attached.
+
+The provider already ships the exact tool that would catch this immediately, at plan/apply time: `boomi_data_integration_connection_test` (see [`data-sources/data_integration_connection_test.md`](https://github.com/RiveryIO/terraform-provider-data-integration/blob/main/docs/data-sources/data_integration_connection_test.md)), which opens a real connection from the platform side and reports `success`/`error_message` immediately, with a `postcondition` block to fail the plan outright on a bad connection.
+
+**Recommendation:** make the `connection` + `connection_test` pairing the *default* shown pattern everywhere a connection is created in the docs, not an opt-in advanced feature buried on its own data-source page. Concretely:
+- Right now only `data_integration_connection_test.md` itself demonstrates this pairing. `guides/getting-started.md`, `guides/connections.md`, and every per-connector example on `resources/data_integration_connection.md` create a connection with no test attached at all.
+- `getting-started.md`'s very first example is the highest-leverage place to add it — it's the first thing a new user copies, and the cost (one extra data source, a few seconds of plan time) is far lower than discovering a bad connection only after a river's first real run times out with a generic, uninformative error.
+
 ## How to reproduce this review
 
 ```bash
