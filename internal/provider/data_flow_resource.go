@@ -604,10 +604,34 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// (get_disable_inner_tasks_by_river_type -> a "disable" pull-task with
 	// is_cdc=true) -- confirmed live: activated a CDC river, enabled CDC,
 	// called disable_river, and enable_log flipped to false immediately
-	// after, with no separate disable_cdc call needed. So a real
-	// deactivation doesn't need any extra CDC handling here.
+	// after. That inner task is also what unlocks a `properties` change:
+	// CDC log-based rivers reject one outright while CDC logging is enabled
+	// (_validate_locked_properties_for_active_river server-side,
+	// LOCKED_PROPERTIES_FOR_ACTIVE_RIVER = ['properties']) -- API error 400:
+	// "can not update properties for an active data flow. Please disable the
+	// data flow and try again". Reproduced live: an unchanged-properties PUT
+	// succeeds while active+CDC, but a genuine properties change 400s with
+	// this exact message. needsDisableForLockedProperties is structural
+	// (isCDCFlow/propertiesChanging), not a state-transition check like
+	// wasActive/wantActive, so it carries none of that staleness risk.
+	//
+	// Before disabling, capture the flow's live scheduler and reinject it
+	// into the PUT body when config doesn't already supply one (via the
+	// typed schedule block or schedulers_json). disable_river's inner
+	// teardown removes the scheduler, and without this the subsequent
+	// enable_cdc/activate has to recreate one on its own -- with no
+	// guarantee it matches what the customer actually configured, only that
+	// *some* scheduler ends up present.
+	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
+	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
+	needsDisableForLockedProperties := isCurrentlyCDC && propertiesChanging
+
 	deactivated := false
-	if !isLogic && wasActive && !wantActive {
+	if !isLogic && (wasActive && !wantActive || needsDisableForLockedProperties) {
+		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
+			"Error fetching data flow schedulers before disabling", &resp.Diagnostics) {
+			return
+		}
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
@@ -617,51 +641,6 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 		}
 		deactivated = true
-	}
-
-	// The one genuine exception to "disable_river is never a defensive
-	// pre-step": CDC log-based rivers reject a `properties` change outright
-	// while CDC logging is enabled (_validate_locked_properties_for_active_
-	// river server-side, LOCKED_PROPERTIES_FOR_ACTIVE_RIVER = ['properties'])
-	// -- API error 400: "can not update properties for an active data flow.
-	// Please disable the data flow and try again". Reproduced live against a
-	// real river: an unchanged-properties PUT succeeds while active+CDC, but
-	// a genuine properties change 400s with this exact message.
-	//
-	// Unlike the deactivation case above, disable_river is never called here
-	// (wantActive stays true -- there's no deactivation happening), so its
-	// inner CDC teardown never runs. This is the one case that genuinely
-	// needs its own disable_cdc call: the guard's real predicate is
-	// is_river_cdc_enabled(...), reading shared_params.enable_log, and
-	// nothing else in this properties-edit path touches it.
-	//
-	// Called proactively (not reactively on the error) because, unlike
-	// state.Activate, extract_method is structural -- it's not something our
-	// own activate/deactivate calls flip mid-run, so there's no plan-time-
-	// vs-apply-time staleness risk the way there was for a wasActive check.
-	// disable_cdc also no-ops if CDC is already disabled, so calling it
-	// whenever this river IS CDC and properties is part of the diff is safe
-	// even when it turns out not to have been strictly necessary.
-	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
-	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
-	if !deactivated && isCurrentlyCDC && propertiesChanging {
-		// Capture the live scheduler before disabling CDC. disable_cdc's inner
-		// teardown removes it, and unlike the switchingToCDC transition above
-		// (which needs one because the API validator requires it in that PUT),
-		// nothing here supplies one when config doesn't manage schedule/
-		// schedulers_json. Without capturing and reinjecting it into this same
-		// PUT, the subsequent enable_cdc/activate has to recreate a scheduler
-		// on its own -- and there's no guarantee that recreation matches the
-		// one the customer actually configured, only that *some* scheduler
-		// ends up present.
-		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
-			"Error fetching data flow schedulers before CDC properties update", &resp.Diagnostics) {
-			return
-		}
-		resp.Diagnostics.Append(r.disableCDC(ctx, envID, plan.ID.ValueString())...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 	}
 
 	updated, err := r.data.client.UpdateDataFlow(ctx, envID, plan.ID.ValueString(), body)
@@ -789,23 +768,6 @@ func (r *dataFlowResource) enableCDC(ctx context.Context, envID, id string) diag
 	opID, err := r.data.client.EnableCDCDataFlow(ctx, envID, id)
 	if err != nil {
 		addAPIError(&diags, "Error enabling CDC for data flow", err)
-		return diags
-	}
-	if opID != "" {
-		r.waitForOpWithTimeout(ctx, envID, opID, cdcEnableOpTimeout, &diags)
-	}
-	return diags
-}
-
-// disableCDC clears shared_params.enable_log -- the field
-// _validate_locked_properties_for_active_river actually checks server-side,
-// independent of river_status/activate. Safe to call unconditionally: the
-// endpoint no-ops if CDC is already disabled.
-func (r *dataFlowResource) disableCDC(ctx context.Context, envID, id string) diag.Diagnostics {
-	var diags diag.Diagnostics
-	opID, err := r.data.client.DisableCDCDataFlow(ctx, envID, id)
-	if err != nil {
-		addAPIError(&diags, "Error disabling CDC for data flow", err)
 		return diags
 	}
 	if opID != "" {

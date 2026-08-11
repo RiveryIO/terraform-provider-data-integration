@@ -654,35 +654,32 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateDisablesCDCBeforePropertiesChange proves the narrow
+// TestDataFlowUpdateDisablesRiverBeforePropertiesChange proves the narrow
 // exception CORE-2346 identified: a CDC (log-based) river with CDC logging
 // currently enabled rejects a `properties` change outright with a 400
 // ("can not update properties for an active data flow. Please disable the
 // data flow and try again") — a real, unconditional server-side lock.
 //
-// The name of that error is misleading: the guard's real predicate is
-// is_river_cdc_enabled(...), which reads shared_params.enable_log -- a field
-// entirely independent of river_status/activate. disable_river never
-// touches it (confirmed against the backend source), so calling
-// disable_river/retrying alone does not reliably clear it. disable_cdc is
-// what actually clears it, and this is called proactively (not reactively on
-// the error) because, unlike state.Activate, extract_method is structural --
-// not something our own activate/deactivate calls flip mid-run the way
-// river_status is, so there's no plan-time-vs-apply-time staleness risk here
-// (see TestDataFlowUpdateSkipsDisableForLogicType's sibling test file
-// history for that staleness story on the *river_status* side).
-func TestDataFlowUpdateDisablesCDCBeforePropertiesChange(t *testing.T) {
+// disable_river's own operation tears down a CDC river's connector and
+// clears shared_params.enable_log as an inner task
+// (get_disable_inner_tasks_by_river_type -> a "disable" pull-task with
+// is_cdc=true) -- confirmed live -- so it unlocks this same guard, even
+// though wantActive stays true and no real deactivation is happening. This
+// is called proactively (not reactively on the error) because, unlike
+// state.Activate, extract_method is structural -- not something our own
+// activate/deactivate calls flip mid-run the way river_status is, so there's
+// no plan-time-vs-apply-time staleness risk here (see
+// TestDataFlowUpdateSkipsDisableForLogicType's sibling test file history for
+// that staleness story on the *river_status* side).
+func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_cdc"),
+		case strings.HasSuffix(req.URL.Path, "/disable_river"),
 			strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
-			w.WriteHeader(http.StatusNoContent)
-		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			t.Errorf("disable_river does not clear enable_log and should not be called for this")
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.Header().Set("Content-Type", "application/json")
@@ -728,7 +725,7 @@ func TestDataFlowUpdateDisablesCDCBeforePropertiesChange(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
 	wantCalls := []string{
-		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_cdc",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
 		"GET /v1/accounts/acc/environments/env1/rivers/river1",
 		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
 		"POST /v1/accounts/acc/environments/env1/rivers/river1/enable_cdc",
@@ -739,18 +736,19 @@ func TestDataFlowUpdateDisablesCDCBeforePropertiesChange(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged proves the other
-// half of the same fix: an update that doesn't touch `properties` at all
-// (e.g. renaming the flow) never calls disable_cdc — no unnecessary
-// disable/re-enable round trip interrupting CDC capture for no reason.
-func TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged(t *testing.T) {
+// TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged proves the other half
+// of the same fix: an update that doesn't touch `properties` at all (e.g.
+// renaming the flow) never calls disable_river for an active-staying-active
+// flow — no unnecessary disable/re-enable round trip interrupting CDC
+// capture for no reason.
+func TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_cdc"):
-			t.Errorf("disable_cdc must not be called when properties is unchanged")
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active")
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
@@ -798,30 +796,25 @@ func TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
 	for _, call := range calls {
-		if strings.Contains(call, "disable_cdc") {
-			t.Errorf("disable_cdc must not be called when properties is unchanged; got calls: %v", calls)
+		if strings.Contains(call, "disable_river") {
+			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active; got calls: %v", calls)
 		}
 	}
 }
 
-// TestDataFlowUpdateDeactivationSkipsSeparateCDCDisable proves that a real
-// deactivation of a CDC river (true -> false) does NOT need its own
-// disable_cdc call: disable_river's own operation already tears down the
-// CDC connector as an inner task (get_disable_inner_tasks_by_river_type ->
-// a "disable" pull-task with is_cdc=true). Confirmed live against a real
-// river: activated it, enabled CDC, called disable_river, and
-// shared_params.enable_log flipped to false immediately after with no
-// separate disable_cdc call. Calling disable_cdc here too would just be a
-// redundant (if harmless) extra round trip.
-func TestDataFlowUpdateDeactivationSkipsSeparateCDCDisable(t *testing.T) {
+// TestDataFlowUpdateDeactivationDisablesRiverOnce proves that a real
+// deactivation of a CDC river (true -> false) calls disable_river exactly
+// once -- its own operation already tears down the CDC connector as an
+// inner task (get_disable_inner_tasks_by_river_type -> a "disable" pull-task
+// with is_cdc=true). Confirmed live against a real river: activated it,
+// enabled CDC, called disable_river, and shared_params.enable_log flipped to
+// false immediately after -- no separate CDC-disable call needed.
+func TestDataFlowUpdateDeactivationDisablesRiverOnce(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_cdc"):
-			t.Errorf("disable_cdc must not be called on deactivation -- disable_river's own inner task already handles it")
-			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(req.URL.Path, "/disable_river"):
 			w.WriteHeader(http.StatusNoContent)
 		default:
