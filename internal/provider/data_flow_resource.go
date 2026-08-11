@@ -213,7 +213,17 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"schedulers_json": schema.StringAttribute{
-				Optional:   true,
+				Optional: true,
+				// Computed because the API can own this value even when config never sets
+				// it: CDC flows always carry a real scheduler (mandatory server-side), and
+				// enabling/disabling CDC deletes/recreates it as a side effect. Without
+				// Computed, an unset schedulers_json plans as a known null on every Update,
+				// and apply() backfilling the real (non-null) API value after the disable/
+				// enable-CDC round trip trips "provider produced inconsistent result after
+				// apply". Computed makes an unset value plan as Unknown on Update instead,
+				// which is allowed to differ freely after apply — matching the existing
+				// group_id/activate pattern in this file for server-owned optional fields.
+				Computed:   true,
 				CustomType: jsontypes.NormalizedType{},
 				DeprecationMessage: "Use the typed `schedule` block instead — it mirrors the API's " +
 					"RiverSchedule schema and is singular because the API permits at most one " +
