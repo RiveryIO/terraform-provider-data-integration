@@ -52,7 +52,20 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 			"test-connection route; this reproduces what the console's \"Test Connection\" button does. " +
 			"The read does NOT fail when the connection is unreachable — instead `success` is false and " +
 			"`error_message` carries the real connector error (e.g. an ORA-* code). Assert on `success` " +
-			"in a lifecycle precondition/check block if you want a bad connection to fail the plan.",
+			"in a lifecycle precondition/check block if you want a bad connection to fail the plan.\n\n" +
+			"`task_type` defaults to \"source\" — this tests whether the connection can be PULLED FROM, " +
+			"not whether it can be pushed to. For a data-warehouse connection used as a data flow's " +
+			"TARGET (Snowflake, BigQuery, Databricks), that default is the wrong check: the API rejects " +
+			"a warehouse tested as a source with a 400 \"The connection does not match to the provided " +
+			"connection_type\" — and because that is a hard error, not `success = false`, a " +
+			"postcondition on `self.success` never even runs; `error_message` is left empty and the " +
+			"actual failure surfaces as a provider error instead. Use " +
+			"`boomi_data_integration_target_metadata` to check a warehouse target instead — it issues " +
+			"the correct `task_type = \"target\"` request and doubles as reachability plus a live list " +
+			"of its databases/datasets/catalogs. If you do set `task_type = \"target\"` here directly, " +
+			"only the warehouse's own listing verb is accepted (e.g. `get_databases` for Snowflake); " +
+			"`get_db_metadata` is rejected with a 422 \"did not match any key in the pull-translate " +
+			"mapping for this datasource_id\".",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -78,8 +91,12 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 					"\"get_db_metadata\". Other reachability tasks: \"get_schemas\", \"get_databases\".",
 			},
 			"task_type": schema.StringAttribute{
-				Optional:    true,
-				Description: "Whether the connection is used as a \"source\" (default) or \"target\".",
+				Optional: true,
+				Description: "Whether the connection is used as a \"source\" (default) or \"target\". " +
+					"Get this wrong for a data-warehouse connection (Snowflake/BigQuery/Databricks) and " +
+					"the API returns a hard 400 error rather than `success = false` — see the data " +
+					"source description for why `boomi_data_integration_target_metadata` is the right " +
+					"tool for a warehouse target instead.",
 			},
 			"inputs_json": schema.StringAttribute{
 				Optional: true,

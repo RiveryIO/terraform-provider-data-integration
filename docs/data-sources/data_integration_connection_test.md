@@ -3,6 +3,7 @@ page_title: "Test a connection (boomi_data_integration_connection_test)"
 subcategory: "Connections"
 description: |-
   Tests whether an existing connection can actually reach its source/target and authenticate, by having the platform open a real connection to it and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead success is false and error_message carries the real connector error (e.g. an ORA-* code). Assert on success in a lifecycle precondition/check block if you want a bad connection to fail the plan.
+  task_type defaults to "source" — this tests whether the connection can be PULLED FROM, not whether it can be pushed to. For a data-warehouse connection used as a data flow's TARGET (Snowflake, BigQuery, Databricks), that default is the wrong check: the API rejects a warehouse tested as a source with a 400 "The connection does not match to the provided connection_type" — and because that is a hard error, not success = false, a postcondition on self.success never even runs; error_message is left empty and the actual failure surfaces as a provider error instead. Use boomi_data_integration_target_metadata to check a warehouse target instead — it issues the correct task_type = "target" request and doubles as reachability plus a live list of its databases/datasets/catalogs. If you do set task_type = "target" here directly, only the warehouse's own listing verb is accepted (e.g. get_databases for Snowflake); get_db_metadata is rejected with a 422 "did not match any key in the pull-translate mapping for this datasource_id".
 ---
 
 # Test a connection
@@ -55,6 +56,24 @@ data "boomi_data_integration_connection_test" "oracle" {
 }
 ```
 
+## Testing a warehouse TARGET: use `target_metadata`, not this data source
+
+`task_type` defaults to `"source"` — this tests whether the connection can be **pulled from**, not
+whether it can be **pushed to**. For a data-warehouse connection used as a data flow's target
+(Snowflake, BigQuery, Databricks), that default is wrong: the API rejects a warehouse connection
+tested as a source with `400 "The connection does not match to the provided connection_type"`.
+
+That failure is a hard provider error, **not** `success = false` — so a `postcondition` on
+`self.success` never even runs, `error_message` stays empty, and the misleading 400 is all you see.
+
+Use [`boomi_data_integration_target_metadata`](./data_integration_target_metadata) to check a
+warehouse target instead. It sends the correct `task_type = "target"` request and doubles as a
+reachability check plus a live list of the warehouse's databases/datasets/catalogs.
+
+If you set `task_type = "target"` here directly anyway, only the warehouse's own listing verb is
+accepted (e.g. `get_databases` for Snowflake) — `task = "get_db_metadata"` (the default) is rejected
+with a `422 "did not match any key in the pull-translate mapping for this datasource_id"`.
+
 ## This is a live network call, and it can run during `plan`
 
 Reading this data source opens a real connection from the platform to your
@@ -94,7 +113,7 @@ live connection attempt per `connection_test` in the configuration.
 - `environment_id` (String) Environment ID. Falls back to the provider default.
 - `inputs_json` (String) Optional extra pull_request_inputs fields as a JSON object, merged into the request (e.g. {"database_name":"MYDB"} for Snowflake, or {"schemas":["DEV"]}). connection_id and pull_request_type are always set by the provider.
 - `task` (String) The pull-request operation that opens the connection. Defaults to "get_db_metadata". Other reachability tasks: "get_schemas", "get_databases".
-- `task_type` (String) Whether the connection is used as a "source" (default) or "target".
+- `task_type` (String) Whether the connection is used as a "source" (default) or "target". Get this wrong for a data-warehouse connection (Snowflake/BigQuery/Databricks) and the API returns a hard 400 error rather than `success = false` — see the data source description for why `boomi_data_integration_target_metadata` is the right tool for a warehouse target instead.
 - `timeout_seconds` (Number) How long to wait for the test to finish before erroring. Default 180.
 
 ### Read-Only

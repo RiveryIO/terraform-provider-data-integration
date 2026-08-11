@@ -83,15 +83,22 @@ resource "boomi_data_integration_connection" "snowflake_target" {
   })
 }
 
-data "boomi_data_integration_connection_test" "snowflake_target" {
+# A warehouse connection must be checked as a TARGET, not a source.
+# connection_test defaults to task_type = "source", and the API rejects a
+# Snowflake connection tested that way with 400 "The connection does not
+# match to the provided connection_type" — a hard provider error, not
+# success = false, so a postcondition on self.success would never even run.
+# target_metadata drives the same discovery the console's target picker uses
+# (task_type "target" + get_databases) and doubles as a reachability check.
+data "boomi_data_integration_target_metadata" "snowflake_target" {
   environment_id = var.environment_id
   connection_id  = boomi_data_integration_connection.snowflake_target.id
-  datasource_id  = "snowflake"
+  target_type    = "snowflake"
 
   lifecycle {
     postcondition {
-      condition     = self.success
-      error_message = "Snowflake connection failed: ${self.error_message}"
+      condition     = contains(self.names, var.snowflake_database)
+      error_message = "Snowflake reachable but database ${var.snowflake_database} not found in ${jsonencode(self.names)}"
     }
   }
 }
