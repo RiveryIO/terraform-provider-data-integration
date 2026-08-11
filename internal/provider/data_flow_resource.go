@@ -588,21 +588,37 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// as well as the (now-removed) pre-edit case.
 	isLogic := plan.Type.ValueString() == "logic"
 
-	// disable_river is called ONLY to actually realize activate: true -> false
-	// (the desired end state IS "disabled", so we call the endpoint that makes
-	// that real) -- never as a defensive "must be inactive before any PUT"
-	// pre-step. Investigated the real backend (rivery_api_service,
-	// see CORE-2346): PUT /rivers/{cross_id} has no general "must be inactive"
-	// requirement for any river type, so calling disable_river before editing
-	// an active-staying-active flow (or before activating a previously-
-	// inactive one) was pure unnecessary overhead, not a real requirement --
-	// removed for every type, not just logic. The one genuine exception,
-	// CDC log-based rivers rejecting a `properties` change while logging is
-	// enabled, is a narrow, distinct lock (_validate_locked_properties_for_
-	// active_river server-side) that surfaces as its own targeted API error
-	// on UpdateDataFlow below rather than being pre-empted here.
+	// disable_river is called to actually realize activate: true -> false (the
+	// desired end state IS "disabled", so we call the endpoint that makes that
+	// real) -- never as a defensive "must be inactive before any PUT" pre-step.
+	// Investigated the real backend (rivery_api_service, see CORE-2346):
+	// PUT /rivers/{cross_id} has no general "must be inactive" requirement for
+	// any river type, so calling disable_river before editing an
+	// active-staying-active flow (or before activating a previously-inactive
+	// one) was pure unnecessary overhead, not a real requirement -- removed
+	// for every type, not just logic.
+	//
+	// The one genuine exception: CDC log-based rivers reject a `properties`
+	// change outright while logging is enabled (_validate_locked_properties_
+	// for_active_river server-side, LOCKED_PROPERTIES_FOR_ACTIVE_RIVER =
+	// ['properties']) -- API error 400: "can not update properties for an
+	// active data flow. Please disable the data flow and try again". Unlike
+	// the general case above, this genuinely can't be worked around by just
+	// PUTting: it's a real, narrow, unconditional lock scoped to CDC rivers
+	// specifically. Identify "is this a CDC river" from state.PropertiesJSON
+	// (the last confirmed-real properties, populated by Read() before every
+	// Update()), not plan.PropertiesJSON -- the lock is keyed on whether CDC
+	// is enabled *right now* server-side, which state reflects and a
+	// not-yet-applied plan value doesn't. Only trip this when properties is
+	// actually part of the diff -- an update that leaves properties untouched
+	// (e.g. only renaming the flow) never hits the lock and shouldn't pay for
+	// a disable/re-enable round trip.
+	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
+	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
+	needsDisableForLockedProperties := !isLogic && wasActive && isCurrentlyCDC && propertiesChanging
+
 	deactivated := false
-	if !isLogic && wasActive && !wantActive {
+	if !isLogic && (wasActive && !wantActive || needsDisableForLockedProperties) {
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
