@@ -654,35 +654,31 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateDisablesForLockedCDCProperties proves the narrow
-// exception CORE-2346 identified: unlike every other properties edit (see
-// TestDataFlowUpdateActivationTransitions's "unchanged and active" case,
-// which correctly sends no disable_river), a CDC (log-based) river that is
-// currently active rejects a `properties` change outright with a 400
+// TestDataFlowUpdateDisablesRiverBeforePropertiesChange proves the narrow
+// exception CORE-2346 identified: a CDC (log-based) river with CDC logging
+// currently enabled rejects a `properties` change outright with a 400
 // ("can not update properties for an active data flow. Please disable the
-// data flow and try again") — a real, unconditional server-side lock, not
-// something PUTting around works for. This must disable first, PUT, then
-// re-enable CDC and re-activate (since activate stays true throughout).
-func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
-	const cdcPropsV1 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":true}}}}`
-	const cdcPropsV2 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":false}}}}`
-
+// data flow and try again") — a real, unconditional server-side lock.
+//
+// disable_river's own operation tears down a CDC river's connector and
+// clears shared_params.enable_log as an inner task
+// (get_disable_inner_tasks_by_river_type -> a "disable" pull-task with
+// is_cdc=true) -- confirmed live -- so it unlocks this same guard, even
+// though wantActive stays true and no real deactivation is happening. This
+// is called proactively (not reactively on the error) because, unlike
+// state.Activate, extract_method is structural -- not something our own
+// activate/deactivate calls flip mid-run the way river_status is, so there's
+// no plan-time-vs-apply-time staleness risk here (see
+// TestDataFlowUpdateSkipsDisableForLogicType's sibling test file history for
+// that staleness story on the *river_status* side).
+func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
-	disabledBeforePut := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
-		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			disabledBeforePut = true
-			w.WriteHeader(http.StatusNoContent)
-		case req.Method == http.MethodPut && !disabledBeforePut:
-			// Reproduces the real API's locked-properties rejection if the fix
-			// regresses and the PUT is attempted before disabling.
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"detail":"Error: can not update properties for an ` +
-				`active data flow. Please disable the data flow and try again"}`))
-		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
+		case strings.HasSuffix(req.URL.Path, "/disable_river"),
+			strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -700,6 +696,7 @@ func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
 	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
 	s := dataFlowSchemaForTest(t)
 
+	const cdcPropsV2 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":false}}}}`
 	build := func(props string) tftypes.Value {
 		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
 			"id":              tftypes.NewValue(tftypes.String, "river1"),
@@ -716,7 +713,7 @@ func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
 		})
 	}
 	planRaw := build(cdcPropsV2)
-	stateRaw := build(cdcPropsV1)
+	stateRaw := build(cdcProps)
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
 	r.Update(ctx, resource.UpdateRequest{
@@ -725,7 +722,7 @@ func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
 	}, resp)
 
 	if resp.Diagnostics.HasError() {
-		t.Fatalf("unexpected diagnostics (fix should disable before PUT, not surface the API's 400): %v", resp.Diagnostics)
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}
 	wantCalls := []string{
 		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
@@ -739,21 +736,19 @@ func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged proves the
-// other half of the same fix: a CDC river update that does NOT touch
-// properties (e.g. renaming the flow) never hits the lock server-side, so it
-// must not pay for a disable/re-enable round trip either — matching
-// TestDataFlowUpdateActivationTransitions's "unchanged and active" case, but
-// specifically for a CDC-type flow (the type most likely to be miscategorized
-// by an overly broad "is CDC" check).
-func TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged(t *testing.T) {
+// TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged proves the other half
+// of the same fix: an update that doesn't touch `properties` at all (e.g.
+// renaming the flow) never calls disable_river for an active-staying-active
+// flow — no unnecessary disable/re-enable round trip interrupting CDC
+// capture for no reason.
+func TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
 		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			t.Errorf("disable_river must not be called when properties is unchanged")
+			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active")
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
@@ -802,8 +797,75 @@ func TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged(t *testing.T
 	}
 	for _, call := range calls {
 		if strings.Contains(call, "disable_river") {
-			t.Errorf("disable_river must not be called when properties is unchanged; got calls: %v", calls)
+			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active; got calls: %v", calls)
 		}
+	}
+}
+
+// TestDataFlowUpdateDeactivationDisablesRiverOnce proves that a real
+// deactivation of a CDC river (true -> false) calls disable_river exactly
+// once -- its own operation already tears down the CDC connector as an
+// inner task (get_disable_inner_tasks_by_river_type -> a "disable" pull-task
+// with is_cdc=true). Confirmed live against a real river: activated it,
+// enabled CDC, called disable_river, and shared_params.enable_log flipped to
+// false immediately after -- no separate CDC-disable call needed.
+func TestDataFlowUpdateDeactivationDisablesRiverOnce(t *testing.T) {
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"source_to_target","metadata":{"river_status":"disabled"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(activate bool) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, cdcProps), // unchanged on both sides
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"activate":        boolRaw(types.BoolValue(activate)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	planRaw := build(false)
+	stateRaw := build(true)
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	wantCalls := []string{
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+	}
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
 	}
 }
 

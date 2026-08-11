@@ -565,18 +565,9 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		!isCDCFlow(state.PropertiesJSON.ValueString())
 
 	if switchingToCDC {
-		// When the config supplies schedulers_json, buildBody has already set it and
-		// that takes precedence. Otherwise fall back to the schedulers currently on
-		// the data flow so the CDC validator still passes.
-		if _, hasSchedulers := body["schedulers"]; !hasSchedulers {
-			current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
-			if err != nil {
-				addAPIError(&resp.Diagnostics, "Error fetching data flow schedulers for CDC transition", err)
-				return
-			}
-			if schedulers, ok := current["schedulers"]; ok {
-				body["schedulers"] = schedulers
-			}
+		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
+			"Error fetching data flow schedulers for CDC transition", &resp.Diagnostics) {
+			return
 		}
 	}
 
@@ -598,27 +589,39 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// one) was pure unnecessary overhead, not a real requirement -- removed
 	// for every type, not just logic.
 	//
-	// The one genuine exception: CDC log-based rivers reject a `properties`
-	// change outright while logging is enabled (_validate_locked_properties_
-	// for_active_river server-side, LOCKED_PROPERTIES_FOR_ACTIVE_RIVER =
-	// ['properties']) -- API error 400: "can not update properties for an
-	// active data flow. Please disable the data flow and try again". Unlike
-	// the general case above, this genuinely can't be worked around by just
-	// PUTting: it's a real, narrow, unconditional lock scoped to CDC rivers
-	// specifically. Identify "is this a CDC river" from state.PropertiesJSON
-	// (the last confirmed-real properties, populated by Read() before every
-	// Update()), not plan.PropertiesJSON -- the lock is keyed on whether CDC
-	// is enabled *right now* server-side, which state reflects and a
-	// not-yet-applied plan value doesn't. Only trip this when properties is
-	// actually part of the diff -- an update that leaves properties untouched
-	// (e.g. only renaming the flow) never hits the lock and shouldn't pay for
-	// a disable/re-enable round trip.
+	// disable_river's own operation already tears down a CDC river's
+	// connector and clears shared_params.enable_log as an inner task
+	// (get_disable_inner_tasks_by_river_type -> a "disable" pull-task with
+	// is_cdc=true) -- confirmed live: activated a CDC river, enabled CDC,
+	// called disable_river, and enable_log flipped to false immediately
+	// after. That inner task is also what unlocks a `properties` change:
+	// CDC log-based rivers reject one outright while CDC logging is enabled
+	// (_validate_locked_properties_for_active_river server-side,
+	// LOCKED_PROPERTIES_FOR_ACTIVE_RIVER = ['properties']) -- API error 400:
+	// "can not update properties for an active data flow. Please disable the
+	// data flow and try again". Reproduced live: an unchanged-properties PUT
+	// succeeds while active+CDC, but a genuine properties change 400s with
+	// this exact message. needsDisableForLockedProperties is structural
+	// (isCDCFlow/propertiesChanging), not a state-transition check like
+	// wasActive/wantActive, so it carries none of that staleness risk.
+	//
+	// Before disabling, capture the flow's live scheduler and reinject it
+	// into the PUT body when config doesn't already supply one (via the
+	// typed schedule block or schedulers_json). disable_river's inner
+	// teardown removes the scheduler, and without this the subsequent
+	// enable_cdc/activate has to recreate one on its own -- with no
+	// guarantee it matches what the customer actually configured, only that
+	// *some* scheduler ends up present.
 	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
 	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
-	needsDisableForLockedProperties := !isLogic && wasActive && isCurrentlyCDC && propertiesChanging
+	needsDisableForLockedProperties := isCurrentlyCDC && propertiesChanging
 
 	deactivated := false
 	if !isLogic && (wasActive && !wantActive || needsDisableForLockedProperties) {
+		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
+			"Error fetching data flow schedulers before disabling", &resp.Diagnostics) {
+			return
+		}
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
@@ -897,6 +900,30 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	return body, true
 }
 
+// ensureSchedulersInBody makes sure body carries the data flow's current live
+// scheduler when config doesn't already supply one (via the typed schedule
+// block or schedulers_json). Used both when a PUT switches a flow into CDC
+// (the API validator requires a scheduler present) and before a PUT that
+// disables CDC to unlock a properties change (so the disable/enable-CDC
+// round trip re-asserts the original schedule explicitly instead of relying
+// on whatever the backend recreates by default).
+func (r *dataFlowResource) ensureSchedulersInBody(
+	ctx context.Context, envID, id string, body map[string]any, errSummary string, diags *diag.Diagnostics,
+) bool {
+	if _, hasSchedulers := body["schedulers"]; hasSchedulers {
+		return true
+	}
+	current, err := r.data.client.GetDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(diags, errSummary, err)
+		return false
+	}
+	if schedulers, ok := current["schedulers"]; ok {
+		body["schedulers"] = schedulers
+	}
+	return true
+}
+
 // ── typed settings / schedule ─────────────────────────────────────────────────
 
 // dataFlowNotificationReportAttributes returns the RiverNotificationReport
@@ -1104,18 +1131,11 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
-	// schedulers_json is Optional (not Computed), so an unset config is null. Only
-	// seed it from the API when it is null AND the data flow actually carries a
-	// scheduler — i.e. on import. Never populate from an empty API list, which
-	// would turn a legitimately-null config into "[]" and break plan==apply
-	// consistency on create.
-	if m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown() {
-		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
-			if raw, err := json.Marshal(schedulers); err == nil {
-				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))
-			}
-		}
-	}
+	// schedulers_json is Optional (not Computed) and config-authoritative, same
+	// as properties_json/settings_json: never synced back from the API. The
+	// actual live scheduler surviving a disable/re-enable-CDC round trip is
+	// handled separately and unconditionally by ensureSchedulersInBody, so
+	// nothing here needs to mirror it into Terraform state.
 	return diags
 }
 
