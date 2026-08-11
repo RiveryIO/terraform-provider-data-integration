@@ -69,7 +69,7 @@ hand-writing the table list:
 ```hcl
 data "boomi_data_integration_source_metadata" "customers_db" {
   connection_id     = boomi_data_integration_connection.mysql_source.id
-  source_type       = "mysql"
+  datasource        = "mysql"
   schema            = "app"
   extract_method    = "incremental"
   incremental_field = "updated_at"
@@ -93,7 +93,7 @@ without guessing or logging into the console:
 ```hcl
 data "boomi_data_integration_target_metadata" "snowflake_dbs" {
   connection_id = boomi_data_integration_connection.snowflake.id
-  target_type   = "snowflake"   # lists databases; "bq" lists datasets, "databricks" lists catalogs
+  target_type   = "snowflake" # lists databases; "bigquery" lists datasets, "databricks" lists catalogs
 }
 ```
 

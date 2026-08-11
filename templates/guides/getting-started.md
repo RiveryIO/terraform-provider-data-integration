@@ -87,19 +87,52 @@ resource "boomi_data_integration_connection" "snowflake" {
   type = "snowflake"
 
   parameters_json = jsonencode({
-    account   = "xy12345.us-east-1"
-    username  = "SVC_USER"
-    password  = "..."
-    database  = "ANALYTICS"
-    warehouse = "COMPUTE_WH"
-    schema    = "PUBLIC"
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    password              = "..."
+    default_database_name = "ANALYTICS"
+    warehouse             = "COMPUTE_WH"
+    default_schema_name   = "PUBLIC"
   })
 }
 ```
 
-To list all available connection types and their required fields, use the
+Property names inside `parameters_json` are set by the API, and they often
+differ from the vendor's own console labels — Snowflake's is `account_name`,
+not `account`, and `default_database_name`, not `database`. To list all
+available connection types and their exact required fields, use the
 [`boomi_data_integration_connection_types`](../data-sources/data_integration_connection_types.md)
 data source.
+
+### Test each connection before you build on it
+
+A connection that applies cleanly is not necessarily a connection that
+*works* — `apply` only stores the credentials, it never dials the source.
+Attach a [`boomi_data_integration_connection_test`](../data-sources/data_integration_connection_test.md)
+to each one with a `postcondition`, and a bad host, credential, or network
+path fails the apply immediately:
+
+```hcl
+data "boomi_data_integration_connection_test" "snowflake" {
+  connection_id = boomi_data_integration_connection.snowflake.id
+  datasource_id = "snowflake"
+
+  lifecycle {
+    postcondition {
+      condition     = self.success
+      error_message = "Snowflake connection failed: ${self.error_message}"
+    }
+  }
+}
+```
+
+Without this, an unreachable source stays invisible until the data flow's
+first run, which surfaces it as a generic timeout roughly ten minutes later
+with no indication that the connection was the cause. The test costs a few
+seconds. Read the
+[data source's page](../data-sources/data_integration_connection_test.md)
+before adding it to an existing connection, though — it runs at plan time
+there, which has its own consequences.
 
 ---
 
@@ -120,35 +153,25 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name          = "jira"
       connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "regular"
+      run_type      = "predefined_report"
       cdc_settings  = null
-      additional_settings = { source_type = "source_to_target" }
     }
     target = {
-      name          = "snowflake"
-      connection_id = boomi_data_integration_connection.snowflake.id
-      schema        = "PUBLIC"
-      db            = "ANALYTICS"
+      name           = "snowflake"
+      connection_id  = boomi_data_integration_connection.snowflake.id
+      loading_method = "overwrite"
+      database_name  = "ANALYTICS"
+      schema_name    = "PUBLIC"
     }
     schemas = [{
       name = "no_schema"
       tables = [{
-        run_type_and_datasource = "single_table"
+        run_type_and_datasource = "predefined_report"
         details = {
-          name                       = "issues"
+          table_name                 = "issues"
           target_table               = "jira_issues"
           is_selected                = true
-          is_custom_incremental      = false
-          exporter_chunk_size        = 30000
-          modified_columns           = []
-          incremental_field          = null
-          date_range                 = null
-          running_number             = null
-          epoch                      = null
-          change_tracking_settings   = null
-          system_versioning_settings = null
-          additional_target_settings = null
-          cdc_settings               = { initiate_table = null, overwrite_table_in_migration = null }
+          extract_method             = "all"
           additional_source_settings = { report_type = "full_table" }
         }
       }]
@@ -156,6 +179,19 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
   })
 }
 ```
+
+Three fields in there are easy to get wrong and are worth calling out:
+
+- **`run_type_and_datasource`** is a discriminator, and it accepts exactly two
+  values: `multi_tables` for database sources, `predefined_report` for
+  connectors that expose reports (Jira here). Anything else is rejected.
+  It should agree with the source's `run_type`.
+- **`loading_method`** is **required** on the target. Omitting it fails
+  validation.
+- The target's container fields are **`database_name`** and **`schema_name`** —
+  not `database`/`schema` or `db`. See
+  [Loading methods](./loading-methods.md#the-target-union) for the full target
+  union.
 
 Set `activate = true` to activate the flow immediately after creation.
 

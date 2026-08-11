@@ -25,6 +25,32 @@ with a `postcondition` — see the example below.
 
 {{ tffile "examples/data-sources/boomi_data_integration_connection_test/data-source.tf" }}
 
+## This is a live network call, and it can run during `plan`
+
+Reading this data source opens a real connection from the platform to your
+source or target. It is not a cheap local check — budget for anything from a
+few seconds to `timeout_seconds` (default 180).
+
+**When it runs matters.** For a connection Terraform is about to *create*, the
+`connection_id` isn't known until apply, so the test is deferred to apply, as
+you'd expect. But once the pairing exists on a connection that **already
+exists** and is only being *modified*, `connection_id` is known at plan time —
+so `terraform plan` evaluates the data source, against the connection's
+**current** remote state rather than the state your plan would produce.
+
+That is exactly backwards when you are mid-fix: repairing a broken connection
+means every `plan` first blocks on testing the still-broken version of it, and
+can fail on that before showing you the diff. Land the connection change on its
+own first, then let the test run against the fixed connection:
+
+```bash
+terraform apply -target=boomi_data_integration_connection.mysql_source
+terraform apply   # connection_test now evaluates the repaired connection
+```
+
+Worth keeping in mind for CI too — a `plan` on a pull request will make one
+live connection attempt per `connection_test` in the configuration.
+
 {{ .SchemaMarkdown | trimspace }}
 
 ## Related

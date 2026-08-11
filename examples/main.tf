@@ -28,10 +28,10 @@ resource "boomi_data_integration_connection" "warehouse" {
   type           = "snowflake"
 
   parameters_json = jsonencode({
-    account  = "xy12345.us-east-1"
-    username = "BOOMI_SVC"
-    password = var.snowflake_password
-    database = "ANALYTICS"
+    account_name          = "xy12345.us-east-1"
+    username              = "BOOMI_SVC"
+    password              = var.snowflake_password
+    default_database_name = "ANALYTICS"
   })
 }
 
