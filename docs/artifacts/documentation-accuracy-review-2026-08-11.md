@@ -118,6 +118,37 @@ The provider already ships the exact tool that would catch this immediately, at 
 - Right now only `data_integration_connection_test.md` itself demonstrates this pairing. `guides/getting-started.md`, `guides/connections.md`, and every per-connector example on `resources/data_integration_connection.md` create a connection with no test attached at all.
 - `getting-started.md`'s very first example is the highest-leverage place to add it — it's the first thing a new user copies, and the cost (one extra data source, a few seconds of plan time) is far lower than discovering a bad connection only after a river's first real run times out with a generic, uninformative error.
 
+## Three more provider-behavior gaps found while implementing the SSH-tunnel fix
+
+Found live, same session, while fixing the connection above. None are doc-accuracy bugs in the strict "this sentence is wrong" sense — they're undocumented provider *behaviors* that cost real debugging time and should either be called out in the docs or reconsidered in the provider itself.
+
+### 1. A write-only-only attribute change can silently no-op
+
+`parameters_json` and `file_params_content` are write-only ([`guides/connections.md`](https://github.com/RiveryIO/terraform-provider-data-integration/blob/main/docs/guides/connections.md) covers the *why* — never stored in state), which means Terraform has no prior value to diff their new content against. In practice: updating an existing connection to add the SSH-tunnel fields (`is_ssh_tunnel`, `ssh_remote_host`, etc. inside `parameters_json`, plus a new `file_params_content` entry) while leaving every other attribute (`name`, `type`, `environment_id`) unchanged produced `terraform plan` → **"No changes. Your infrastructure matches the configuration."** — a silent no-op. The API was never called; the broken connection was untouched. Recovery required either bumping an unrelated ordinary attribute (e.g. appending a suffix to `name`) to force a real diff, or `terraform apply -replace=<address>`.
+
+- **Verify yourself:** reproduce with any existing `boomi_data_integration_connection` — change only `parameters_json`/`file_params_content` content, run `terraform plan`, observe no diff is detected despite the JSON content actually differing.
+- **Recommendation:** document this explicitly wherever write-only attributes are introduced (`guides/connections.md`'s "Keyfile-backed credentials" section is the natural place) — readers need to know that touching *only* a write-only field is not guaranteed to produce a plan diff, and what to do about it (bump an ordinary attribute, or `-replace`). This is a direct consequence of Terraform's write-only design (not a provider bug per se), but it's non-obvious enough that it deserves a callout rather than being left for users to discover via a confusing "no changes" on a config they know just changed.
+
+### 2. `connection_test` chained to an existing (already-broken) connection makes `plan` a live, slow, blocking network call
+
+The recommended pattern above (chain `boomi_data_integration_connection_test` right after `boomi_data_integration_connection`) works perfectly for a *new* connection — the test only runs post-apply once the connection exists. But once that pairing exists on an **already-created** resource being *modified* (the exact scenario when fixing a broken connection), `connection_id` is already known at plan time, so `terraform plan` itself evaluates the data source — meaning `plan` makes a real, live round trip to the platform's connection-test endpoint, against the *current* (still-broken) remote state, not the hypothetical post-apply state. In this session that meant `terraform plan` hung for the full `timeout_seconds` (default 180s) and then failed with a connection-test error, on a `plan` that should have been informational-only and instant.
+
+- **Verify yourself:** create a connection + chained `connection_test` for a source with the wrong password; then edit the connection resource's `parameters_json` to fix the password (leaving the `connection_test` block as-is) and run `terraform plan` — the plan phase itself will block on the live test against the old, still-broken state.
+- **Recommendation:** call this out explicitly in [`data-sources/data_integration_connection_test.md`](https://github.com/RiveryIO/terraform-provider-data-integration/blob/main/docs/data-sources/data_integration_connection_test.md) — plan-time evaluation of a data source that depends on an existing (not `create_before_destroy`-recreated) resource is a live external call, not a cheap check, and can reflect stale/broken remote state rather than the plan's hypothetical result. Suggest `terraform apply -target=<connection resource>` as the documented workaround for "I'm fixing a connection that already has a chained test."
+
+### 3. `file_params_content_filenames` is required for SSH-tunnel key uploads too — not just "sometimes needed," and the resulting error is misleading
+
+[`guides/connections.md`](https://github.com/RiveryIO/terraform-provider-data-integration/blob/main/docs/guides/connections.md) documents `file_params_content_filenames` in the context of Snowflake key-pair uploads, phrased as needed for entries "the API validates by extension" — reading as connector/field-specific rather than a blanket requirement. Omitting it for an SSH-tunnel private key upload (`file_params_content = { ssh_pkey_file_path = <pem> }` with no matching `file_params_content_filenames` entry) fails with:
+
+```
+API error 400: "File with extension ssh_pkey_file_path is not supported for connection type mysql"
+```
+
+This message reads as "mysql doesn't support this kind of file field" — a connector-capability error — when the actual cause is that the API fell back to treating the *field name itself* as the filename (since none was given) and rejected the resulting bogus "extension." The fix is simply adding `file_params_content_filenames = { ssh_pkey_file_path = "ssh_key.pem" }` alongside it.
+
+- **Verify yourself:** reproduce with any `file_params_content` entry that has no corresponding `file_params_content_filenames` key — the 400 and its exact wording should reproduce for any connector, not just mysql SSH keys.
+- **Recommendation:** two independent fixes worth making: (a) state plainly in `guides/connections.md` that `file_params_content_filenames` is required for *every* `file_params_content` entry, full stop, not scoped to "entries the API validates by extension" (every entry is validated by extension — that's the whole mechanism); (b) file this as an API-side error-message issue too, since `rivery-api-service` could easily detect "no filename provided, field name has no valid extension" and return a much clearer message than a fake unsupported-connector-type error.
+
 ## How to reproduce this review
 
 ```bash
