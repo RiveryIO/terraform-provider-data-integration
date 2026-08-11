@@ -664,13 +664,14 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 // clears shared_params.enable_log as an inner task
 // (get_disable_inner_tasks_by_river_type -> a "disable" pull-task with
 // is_cdc=true) -- confirmed live -- so it unlocks this same guard, even
-// though wantActive stays true and no real deactivation is happening. This
-// is called proactively (not reactively on the error) because, unlike
-// state.Activate, extract_method is structural -- not something our own
-// activate/deactivate calls flip mid-run the way river_status is, so there's
-// no plan-time-vs-apply-time staleness risk here (see
-// TestDataFlowUpdateSkipsDisableForLogicType's sibling test file history for
-// that staleness story on the *river_status* side).
+// though wantActive stays true and no real deactivation is happening.
+//
+// This fires for any active CDC flow, not just when propertiesChanging (see
+// TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged) -- and, unlike
+// the propertiesChanging-based version this replaced, it does carry the same
+// plan-time-vs-apply-time staleness risk as the wasActive && !wantActive
+// branch above, since it also reads wasActive (state.Activate). Accepted,
+// not fixed, for the same reason that branch already accepts it.
 func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
@@ -736,19 +737,94 @@ func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 	}
 }
 
-// TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged proves the other half
-// of the same fix: an update that doesn't touch `properties` at all (e.g.
-// renaming the flow) never calls disable_river for an active-staying-active
-// flow — no unnecessary disable/re-enable round trip interrupting CDC
-// capture for no reason.
-func TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged(t *testing.T) {
+// TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged reproduces a
+// real failure against a live river: an update whose only tracked change was
+// schedulers_json (properties byte-for-byte identical between plan and
+// state) still 400'd with the locked-properties error. Cause: properties_json
+// is config-authoritative and always overwrites the server's copy verbatim,
+// but the API silently enriches properties server-side with fields config
+// never sets, so a PUT this provider considers a no-op can still be a real
+// change from the API's perspective -- and propertiesChanging, a comparison
+// against Terraform's own remembered state, has no way to see that drift.
+// needsDisableForLockedProperties therefore fires for any active CDC flow
+// regardless of propertiesChanging.
+func TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged(t *testing.T) {
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_river"),
+			strings.HasSuffix(req.URL.Path, "/enable_cdc"),
+			strings.HasSuffix(req.URL.Path, "/activate_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"source_to_target","metadata":{"river_status":"active"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(schedulersJSON tftypes.Value) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, cdcProps),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": schedulersJSON,
+			"activate":        boolRaw(types.BoolValue(true)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	// properties_json is identical on both sides; only schedulers_json differs.
+	planRaw := build(tftypes.NewValue(tftypes.String, nil))
+	stateRaw := build(tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`))
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	sawDisable := false
+	for _, call := range calls {
+		if strings.Contains(call, "disable_river") {
+			sawDisable = true
+		}
+	}
+	if !sawDisable {
+		t.Errorf("expected disable_river to be called for an active CDC flow even with properties unchanged; got calls: %v", calls)
+	}
+}
+
+// TestDataFlowUpdateSkipsDisableForNonCDCActiveFlow proves that
+// needsDisableForLockedProperties (isCurrentlyCDC && wasActive) is scoped to
+// CDC flows: renaming a non-CDC active flow never calls disable_river — no
+// unnecessary disable/re-enable round trip for a flow that was never subject
+// to the locked-properties guard in the first place.
+func TestDataFlowUpdateSkipsDisableForNonCDCActiveFlow(t *testing.T) {
 	ctx := context.Background()
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls = append(calls, req.Method+" "+req.URL.Path)
 		switch {
 		case strings.HasSuffix(req.URL.Path, "/disable_river"):
-			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active")
+			t.Errorf("disable_river must not be called for a non-CDC active flow")
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
 			strings.HasSuffix(req.URL.Path, "/activate_river"):
@@ -775,7 +851,7 @@ func TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged(t *testing.T) {
 			"name":            tftypes.NewValue(tftypes.String, name),
 			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
-			"properties_json": tftypes.NewValue(tftypes.String, cdcProps),
+			"properties_json": tftypes.NewValue(tftypes.String, batchProps),
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
 			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
 			"activate":        boolRaw(types.BoolValue(true)),
@@ -797,7 +873,7 @@ func TestDataFlowUpdateSkipsDisableWhenPropertiesUnchanged(t *testing.T) {
 	}
 	for _, call := range calls {
 		if strings.Contains(call, "disable_river") {
-			t.Errorf("disable_river must not be called when properties is unchanged and the flow stays active; got calls: %v", calls)
+			t.Errorf("disable_river must not be called for a non-CDC active flow; got calls: %v", calls)
 		}
 	}
 }
