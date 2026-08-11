@@ -654,6 +654,159 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 	}
 }
 
+// TestDataFlowUpdateDisablesForLockedCDCProperties proves the narrow
+// exception CORE-2346 identified: unlike every other properties edit (see
+// TestDataFlowUpdateActivationTransitions's "unchanged and active" case,
+// which correctly sends no disable_river), a CDC (log-based) river that is
+// currently active rejects a `properties` change outright with a 400
+// ("can not update properties for an active data flow. Please disable the
+// data flow and try again") — a real, unconditional server-side lock, not
+// something PUTting around works for. This must disable first, PUT, then
+// re-enable CDC and re-activate (since activate stays true throughout).
+func TestDataFlowUpdateDisablesForLockedCDCProperties(t *testing.T) {
+	const cdcPropsV1 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":true}}}}`
+	const cdcPropsV2 = `{"properties_type":"source_to_target","source":{"additional_settings":{"extract_method":"log","cdc_override":{"include_snapshot_tables":false}}}}`
+
+	ctx := context.Background()
+	var calls []string
+	disabledBeforePut := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			disabledBeforePut = true
+			w.WriteHeader(http.StatusNoContent)
+		case req.Method == http.MethodPut && !disabledBeforePut:
+			// Reproduces the real API's locked-properties rejection if the fix
+			// regresses and the PUT is attempted before disabling.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"Error: can not update properties for an ` +
+				`active data flow. Please disable the data flow and try again"}`))
+		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
+			strings.HasSuffix(req.URL.Path, "/activate_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"source_to_target","metadata":{"river_status":"active"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(props string) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, props),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"activate":        boolRaw(types.BoolValue(true)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	planRaw := build(cdcPropsV2)
+	stateRaw := build(cdcPropsV1)
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics (fix should disable before PUT, not surface the API's 400): %v", resp.Diagnostics)
+	}
+	wantCalls := []string{
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/enable_cdc",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/activate_river",
+	}
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
+	}
+}
+
+// TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged proves the
+// other half of the same fix: a CDC river update that does NOT touch
+// properties (e.g. renaming the flow) never hits the lock server-side, so it
+// must not pay for a disable/re-enable round trip either — matching
+// TestDataFlowUpdateActivationTransitions's "unchanged and active" case, but
+// specifically for a CDC-type flow (the type most likely to be miscategorized
+// by an overly broad "is CDC" check).
+func TestDataFlowUpdateSkipsLockedCDCDisableWhenPropertiesUnchanged(t *testing.T) {
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_river"):
+			t.Errorf("disable_river must not be called when properties is unchanged")
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(req.URL.Path, "/enable_cdc"),
+			strings.HasSuffix(req.URL.Path, "/activate_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"source_to_target","metadata":{"river_status":"active"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(name string) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, name),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, cdcProps),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"activate":        boolRaw(types.BoolValue(true)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	planRaw := build("flow renamed")
+	stateRaw := build("flow")
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "disable_river") {
+			t.Errorf("disable_river must not be called when properties is unchanged; got calls: %v", calls)
+		}
+	}
+}
+
 // TestDataFlowReadReconcilesActivate proves the refresh side of the state
 // machine: river_status lands on both status and activate, and an absent
 // river_status changes neither.
