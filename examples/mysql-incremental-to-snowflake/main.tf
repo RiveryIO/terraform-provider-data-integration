@@ -41,6 +41,28 @@ resource "boomi_data_integration_connection" "mysql_source" {
   })
 }
 
+# Prove the connection actually works, at apply time. `apply` on its own only
+# stores credentials — it never dials the source, so an unreachable host stays
+# invisible until the flow's first run fails on a connect timeout minutes later
+# with nothing pointing at the connection. The postcondition turns that into an
+# immediate, named failure.
+#
+# If this fails on a host you can reach from your own machine, read the
+# SSH-tunnel section of the Connections guide before changing anything else:
+# the workers egress from different addresses than your laptop does.
+data "boomi_data_integration_connection_test" "mysql_source" {
+  environment_id = var.environment_id
+  connection_id  = boomi_data_integration_connection.mysql_source.id
+  datasource_id  = "mysql"
+
+  lifecycle {
+    postcondition {
+      condition     = self.success
+      error_message = "MySQL connection failed: ${self.error_message}"
+    }
+  }
+}
+
 # ── Target connection: Snowflake ──────────────────────────────────────────────
 # Password auth is used here to keep the example short. For key-pair auth, drop
 # `password` and upload the .p8 via the connection resource's file_params /
@@ -59,6 +81,19 @@ resource "boomi_data_integration_connection" "snowflake_target" {
     default_database_name = var.snowflake_database
     connection_desc       = "Snowflake incremental target, managed by terraform"
   })
+}
+
+data "boomi_data_integration_connection_test" "snowflake_target" {
+  environment_id = var.environment_id
+  connection_id  = boomi_data_integration_connection.snowflake_target.id
+  datasource_id  = "snowflake"
+
+  lifecycle {
+    postcondition {
+      condition     = self.success
+      error_message = "Snowflake connection failed: ${self.error_message}"
+    }
+  }
 }
 
 # ── Shared target block ───────────────────────────────────────────────────────
