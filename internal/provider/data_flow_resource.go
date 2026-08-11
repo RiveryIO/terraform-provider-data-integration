@@ -575,18 +575,9 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		!isCDCFlow(state.PropertiesJSON.ValueString())
 
 	if switchingToCDC {
-		// When the config supplies schedulers_json, buildBody has already set it and
-		// that takes precedence. Otherwise fall back to the schedulers currently on
-		// the data flow so the CDC validator still passes.
-		if _, hasSchedulers := body["schedulers"]; !hasSchedulers {
-			current, err := r.data.client.GetDataFlow(ctx, envID, plan.ID.ValueString())
-			if err != nil {
-				addAPIError(&resp.Diagnostics, "Error fetching data flow schedulers for CDC transition", err)
-				return
-			}
-			if schedulers, ok := current["schedulers"]; ok {
-				body["schedulers"] = schedulers
-			}
+		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
+			"Error fetching data flow schedulers for CDC transition", &resp.Diagnostics) {
+			return
 		}
 	}
 
@@ -654,6 +645,19 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
 	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
 	if !deactivated && isCurrentlyCDC && propertiesChanging {
+		// Capture the live scheduler before disabling CDC. disable_cdc's inner
+		// teardown removes it, and unlike the switchingToCDC transition above
+		// (which needs one because the API validator requires it in that PUT),
+		// nothing here supplies one when config doesn't manage schedule/
+		// schedulers_json. Without capturing and reinjecting it into this same
+		// PUT, the subsequent enable_cdc/activate has to recreate a scheduler
+		// on its own -- and there's no guarantee that recreation matches the
+		// one the customer actually configured, only that *some* scheduler
+		// ends up present.
+		if !r.ensureSchedulersInBody(ctx, envID, plan.ID.ValueString(), body,
+			"Error fetching data flow schedulers before CDC properties update", &resp.Diagnostics) {
+			return
+		}
 		resp.Diagnostics.Append(r.disableCDC(ctx, envID, plan.ID.ValueString())...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -942,6 +946,30 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 		body["schedulers"] = schedulers
 	}
 	return body, true
+}
+
+// ensureSchedulersInBody makes sure body carries the data flow's current live
+// scheduler when config doesn't already supply one (via the typed schedule
+// block or schedulers_json). Used both when a PUT switches a flow into CDC
+// (the API validator requires a scheduler present) and before a PUT that
+// disables CDC to unlock a properties change (so the disable/enable-CDC
+// round trip re-asserts the original schedule explicitly instead of relying
+// on whatever the backend recreates by default).
+func (r *dataFlowResource) ensureSchedulersInBody(
+	ctx context.Context, envID, id string, body map[string]any, errSummary string, diags *diag.Diagnostics,
+) bool {
+	if _, hasSchedulers := body["schedulers"]; hasSchedulers {
+		return true
+	}
+	current, err := r.data.client.GetDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(diags, errSummary, err)
+		return false
+	}
+	if schedulers, ok := current["schedulers"]; ok {
+		body["schedulers"] = schedulers
+	}
+	return true
 }
 
 // ── typed settings / schedule ─────────────────────────────────────────────────
