@@ -804,6 +804,75 @@ func TestDataFlowUpdateSkipsCDCDisableWhenPropertiesUnchanged(t *testing.T) {
 	}
 }
 
+// TestDataFlowUpdateDisablesCDCOnDeactivation proves the other half of the
+// enable/disable-CDC pairing: deactivating a CDC river (true -> false) must
+// also call disable_cdc, even when properties isn't changing at all --
+// otherwise a "disabled" CDC river can still carry enable_log=true forward,
+// so a later properties-only edit on that now-inactive river would still
+// hit the same lock. disable_river alone was never enough (it doesn't touch
+// enable_log); tying the two together keeps "disabled" meaning disabled.
+func TestDataFlowUpdateDisablesCDCOnDeactivation(t *testing.T) {
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/disable_cdc"),
+			strings.HasSuffix(req.URL.Path, "/disable_river"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+				`"type":"source_to_target","metadata":{"river_status":"disabled"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(activate bool) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, cdcProps), // unchanged on both sides
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"activate":        boolRaw(types.BoolValue(activate)),
+			"status":          stringRaw(types.StringValue(riverStatusActive)),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+	planRaw := build(false)
+	stateRaw := build(true)
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: planRaw, Schema: s},
+		State: tfsdk.State{Raw: stateRaw, Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	wantCalls := []string{
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_cdc",
+		"POST /v1/accounts/acc/environments/env1/rivers/river1/disable_river",
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+	}
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
+	}
+}
+
 // TestDataFlowReadReconcilesActivate proves the refresh side of the state
 // machine: river_status lands on both status and activate, and an absent
 // river_status changes neither.

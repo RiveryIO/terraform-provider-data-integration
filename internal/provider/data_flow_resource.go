@@ -600,6 +600,20 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	//
 	deactivated := false
 	if !isLogic && wasActive && !wantActive {
+		// disable_river only ever touches river_status, never
+		// shared_params.enable_log (see the disable_cdc comment below) -- a
+		// river deactivated this way while still CDC-enabled would silently
+		// carry that lock into its next properties update, even though it's
+		// now river_status=disabled. Deactivating a CDC river's CDC logging
+		// along with the river itself keeps the two in lockstep, so
+		// "disabled" always really means disabled, not just inactive with
+		// logging quietly still running.
+		if isCDCFlow(state.PropertiesJSON.ValueString()) {
+			resp.Diagnostics.Append(r.disableCDC(ctx, envID, plan.ID.ValueString())...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
 		if opID, err2 := r.data.client.DisableDataFlow(ctx, envID, plan.ID.ValueString()); err2 != nil {
 			addAPIError(&resp.Diagnostics, "Error disabling data flow before update", err2)
 			return
@@ -632,9 +646,13 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// disable_cdc also no-ops if CDC is already disabled, so calling it
 	// whenever this river IS CDC and properties is part of the diff is safe
 	// even when it turns out not to have been strictly necessary.
+	//
+	// Skipped when the deactivation branch above already called it: that
+	// branch covers CDC unconditionally on a real deactivation, so a second
+	// call here would just be a redundant (if harmless) no-op.
 	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
 	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
-	if isCurrentlyCDC && propertiesChanging {
+	if !deactivated && isCurrentlyCDC && propertiesChanging {
 		resp.Diagnostics.Append(r.disableCDC(ctx, envID, plan.ID.ValueString())...)
 		if resp.Diagnostics.HasError() {
 			return
