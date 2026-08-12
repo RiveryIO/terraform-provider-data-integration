@@ -140,6 +140,35 @@ Use the extension the connector's schema calls for — `.p8` for Snowflake's
 an SSH private key. `GET /v1/connections_types/{type}` reports the expected
 `file_type` per field.
 
+### Confirming the upload worked
+
+Check `GET .../connections/<id>` after creating a keyfile-backed connection.
+The field that proves the upload landed is the **property name itself** —
+`key_file_path` for Snowflake, `ssh_pkey_file_path` for an SSH key — populated
+with a server-assigned path.
+
+~> **Do not use `credentials_exists` for this.** On a working Snowflake
+key-pair connection `credentials_exists` stays `false`, because no password was
+stored — the credential is the uploaded file. It is a useful check for
+password-based connectors and actively misleading for key-pair ones.
+
+### A fresh upload is not instantly visible to the worker fleet
+
+There is a propagation delay between the file upload finishing and the file
+being readable by the worker that runs a connection test or metadata read. A
+check issued immediately after `apply` can fail with a **connector-level error
+that blames the credentials rather than the file**:
+
+```
+Snowflake connection problem. Please check the connection details or your credentials in
+Snowflake. … ('HY000', '[HY000] [Snowflake][Snowflake] (45) Error loading private key
+file: No such file or directory. (45) (SQLDriverConnect)')
+```
+
+That message sends you to re-check the account name and username, which are
+fine. If `key_file_path` is populated on the connection, the upload itself
+succeeded — retry the read before concluding the key is wrong.
+
 ## Reaching a database through an SSH tunnel
 
 Databases that aren't publicly routable — or that only allow a bastion host —

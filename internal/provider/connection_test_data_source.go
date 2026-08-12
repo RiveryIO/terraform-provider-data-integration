@@ -65,7 +65,14 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 			"of its databases/datasets/catalogs. If you do set `task_type = \"target\"` here directly, " +
 			"only the warehouse's own listing verb is accepted (e.g. `get_databases` for Snowflake); " +
 			"`get_db_metadata` is rejected with a 422 \"did not match any key in the pull-translate " +
-			"mapping for this datasource_id\".",
+			"mapping for this datasource_id\".\n\n" +
+			"This test is a live network call and it competes for platform workers. A test that " +
+			"completes in ~35s on its own can sit at operation status \"R\" past the 180s default when " +
+			"Terraform reads it concurrently with other live data sources, which it does by default. A " +
+			"timeout here is a hard provider error, not `success = false`, so a postcondition cannot " +
+			"catch it — raise `timeout_seconds`, run with `-parallelism=1`, or prefer " +
+			"`boomi_data_integration_source_metadata`, which proves the same connection AND returns the " +
+			"schema mapping the data flow needs, replacing this test rather than adding to it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,

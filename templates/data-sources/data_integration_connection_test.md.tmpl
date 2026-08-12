@@ -49,6 +49,19 @@ Reading this data source opens a real connection from the platform to your
 source or target. It is not a cheap local check — budget for anything from a
 few seconds to `timeout_seconds` (default 180).
 
+**Concurrent reads make that much worse.** Terraform reads independent data
+sources in parallel, and these tests compete for the same platform workers. A
+test that finishes in ~35s on its own has been observed sitting at operation
+status `"R"` past the 180s default when read alongside another live data
+source. A timeout is a hard provider error, not `success = false`, so a
+`postcondition` on `self.success` cannot catch it. Mitigations, best first:
+
+- Prefer `boomi_data_integration_source_metadata` for an RDBMS source — it
+  proves the same connection **and** returns the `schemas[]` mapping the data
+  flow needs, so it replaces this test rather than adding a second round trip.
+- Raise `timeout_seconds`.
+- Run with `-parallelism=1`.
+
 **When it runs matters.** For a connection Terraform is about to *create*, the
 `connection_id` isn't known until apply, so the test is deferred to apply, as
 you'd expect. But once the pairing exists on a connection that **already

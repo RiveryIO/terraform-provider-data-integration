@@ -66,6 +66,96 @@ extraction settings live:
   `schemas[]`, so extraction settings (extract method, date window, target table) are set per report
   entity rather than once on the source.
 
+!> **These two are not interchangeable ways of naming a report.** Whichever
+`run_type` you pick, the report identifier has to end up in
+`source.additional_settings.report` — naming it only as a `predefined_report`
+table's `details.table_name` does **not** populate it, and the run fails. See
+the trap below before choosing `predefined_report`.
+
+### Trap: the report identifier must reach the worker as `report`
+
+Every connector's own definition declares which key carries the report
+identifier, and for the connectors in this family it is `report`
+(`"report_key": "report"`). The extraction worker asserts on it:
+
+```
+assert report, 'Missing Entity!'
+```
+
+If that key is absent the run fails with `Missing Entity!` — an error that names
+nothing, points at nothing, and arrives only at run time. The flow applies and
+activates cleanly first, because `properties_json` is opaque to the provider and
+the API does not validate this either.
+
+The failure mode that produces it: writing a `predefined_report` flow that names
+the report as `schemas[].tables[].details.table_name` and nothing else. Nothing
+in that path copies the value into `additional_settings.report`, so the saved
+flow reaches the worker with no `report` at all.
+
+```hcl
+# WRONG — applies, activates, then fails at run time with `Missing Entity!`
+source = {
+  name          = "jira"
+  run_type      = "predefined_report"
+  connection_id = boomi_data_integration_connection.jira.id
+}
+schemas = [{
+  name = "no_schema"
+  tables = [{
+    run_type_and_datasource = "predefined_report"
+    details = {
+      table_name     = "project" # names the table, NOT the report
+      target_table   = "jira_project"
+      is_selected    = true
+      extract_method = "all"
+    }
+  }]
+}]
+
+# RIGHT — `report` is where the worker looks
+source = {
+  name          = "jira"
+  run_type      = "regular"
+  connection_id = boomi_data_integration_connection.jira.id
+  additional_settings = {
+    connection_type = "jira"
+    report          = "project"
+    extract_method  = "all"
+  }
+}
+target  = { /* … */ table_name = "jira_project" }
+schemas = []
+```
+
+To discover a connector's valid report identifiers, read the `reports` map from:
+
+```
+GET .../data_source_properties/global_properties?datasource_id=<slug>
+```
+
+For Jira that returns 13: `group`, `group_users`, `issue`, `issue_changelogs`,
+`issue_fields`, `project`, `project_category`, `project_role`, `project_type`,
+`resolution`, `sprint`, `user`, `work_logs`. (The same response's
+`cross_reports_predefined` array tells you whether the connector needs mandatory
+Source Settings — empty means it does not. See
+[API connector required settings](./api-connectors.md).)
+
+### `run_type` cannot be changed on an existing flow
+
+Switching a flow's `run_type` is rejected on update:
+
+```
+API error 422: Cannot change run_type from 'multi_tables' to 'regular' during UPDATE.
+Delete and recreate the river.
+```
+
+Use `terraform apply -replace=boomi_data_integration_data_flow.<name>`.
+
+Note the quoted "from" value is the API's **stored** `run_type`, which may not be
+the one you wrote — a flow created as `predefined_report` reports itself as
+`multi_tables` here. Don't let the mismatch send you looking for a phantom
+third configuration.
+
 ### `additional_settings` is free-form
 
 In the API schema `source.additional_settings` is an untyped object: there are no declared properties
@@ -136,7 +226,7 @@ schemas = [{
   tables = [{
     run_type_and_datasource = "predefined_report"
     details = {
-      table_name     = "predefined_project" # the report identifier
+      table_name     = "predefined_project" # names the TABLE, not the report
       target_table   = "jira_project"
       is_selected    = true
       extract_method = "all"
@@ -144,6 +234,12 @@ schemas = [{
   }]
 }]
 ```
+
+~> `details.table_name` identifies the table; it does **not** supply the
+`report` key the extraction worker requires. A flow whose report is named only
+here fails at run time with `Missing Entity!` — set
+`source.additional_settings.report` as well. See
+[the trap above](#trap-the-report-identifier-must-reach-the-worker-as-report).
 
 `no_schema` is the conventional `schemas[].name` for sources that have no database schema concept.
 

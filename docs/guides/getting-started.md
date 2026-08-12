@@ -72,12 +72,20 @@ resource "boomi_data_integration_connection" "jira" {
   type = "jira"
 
   parameters_json = jsonencode({
-    base_url = "https://yourorg.atlassian.net"
-    username = "user@example.com"
-    password = "..."   # Atlassian API token
+    credentials_type = "token"
+    domain_name      = "yourorg"           # the bare subdomain — NOT a URL
+    username         = "user@example.com"
+    api_token        = "..."               # Atlassian API token
   })
 }
 ```
+
+Jira's fields are `credentials_type`/`domain_name`/`username`/`api_token`. There
+is no `base_url` and no `password` property on this connector —
+`credentials_type = "server_app"` uses `full_url`, `username_server_app` and
+`password_server_app` instead. Because the connections API **silently drops
+unknown `parameters_json` keys**, spelling these wrong applies cleanly and
+produces a connection with no credential at all.
 
 **Snowflake:**
 
@@ -153,8 +161,13 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name          = "jira"
       connection_id = boomi_data_integration_connection.jira.id
-      run_type      = "predefined_report"
+      run_type      = "regular"
       cdc_settings  = null
+      additional_settings = {
+        connection_type = "jira"
+        report          = "issue" # which report to pull — see below
+        extract_method  = "all"
+      }
     }
     target = {
       name           = "snowflake"
@@ -162,30 +175,23 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
       loading_method = "overwrite"
       database_name  = "ANALYTICS"
       schema_name    = "PUBLIC"
+      table_name     = "jira_issues"
     }
-    schemas = [{
-      name = "no_schema"
-      tables = [{
-        run_type_and_datasource = "predefined_report"
-        details = {
-          table_name                 = "issues"
-          target_table               = "jira_issues"
-          is_selected                = true
-          extract_method             = "all"
-          additional_source_settings = { report_type = "full_table" }
-        }
-      }]
-    }]
+    schemas = []
   })
 }
 ```
 
-Three fields in there are easy to get wrong and are worth calling out:
+Four things in there are easy to get wrong and are worth calling out:
 
-- **`run_type_and_datasource`** is a discriminator, and it accepts exactly two
-  values: `multi_tables` for database sources, `predefined_report` for
-  connectors that expose reports (Jira here). Anything else is rejected.
-  It should agree with the source's `run_type`.
+- **`report` names which report is pulled, and it must live in
+  `source.additional_settings`.** This is the field the extraction worker reads;
+  without it a run fails with the opaque `Missing Entity!`. See
+  [API connector data flows](./api-connector-data-flows.md#trap-the-report-identifier-must-reach-the-worker-as-report).
+- **`run_type_and_datasource`** (used when a flow does populate `schemas[]`) is a
+  discriminator accepting exactly two values: `multi_tables` for database
+  sources, `predefined_report` for connectors that expose reports. Anything else
+  is rejected. It should agree with the source's `run_type`.
 - **`loading_method`** is **required** on the target. Omitting it fails
   validation.
 - The target's container fields are **`database_name`** and **`schema_name`** —

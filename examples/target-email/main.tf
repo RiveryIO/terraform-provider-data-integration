@@ -7,9 +7,10 @@ resource "boomi_data_integration_connection" "api_source" {
   type = "jira"
 
   parameters_json = jsonencode({
-    base_url = "https://yourorg.atlassian.net"
-    username = "user@example.com"
-    password = "..."
+    credentials_type = "token"
+    domain_name      = "yourorg" # bare subdomain, not a URL
+    username         = "user@example.com"
+    api_token        = "..."
   })
 }
 

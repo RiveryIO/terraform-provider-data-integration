@@ -21,10 +21,19 @@ resource "boomi_data_integration_connection" "jira" {
   name = "Jira"
   type = "jira"
 
+  # Property names come from GET /v1/connections_types/jira. There is no
+  # `base_url` and no `password` on this connector: credentials_type = "token"
+  # requires domain_name + username + api_token. (The "server_app" arm uses
+  # full_url / username_server_app / password_server_app instead.)
+  #
+  # The connections API silently drops unknown parameters_json keys, so a wrong
+  # field name applies cleanly and leaves you with a connection that has no
+  # credential — check api_token_exists on GET .../connections/<id>.
   parameters_json = jsonencode({
-    base_url = "https://yourorg.atlassian.net"
-    username = "user@example.com"
-    password = "..." # Atlassian API token — Settings → Security → API Tokens
+    credentials_type = "token"
+    domain_name      = "yourorg" # bare subdomain — not https://yourorg.atlassian.net
+    username         = "user@example.com"
+    api_token        = "..." # Atlassian API token — Settings → Security → API Tokens
   })
 }
 ```
@@ -124,10 +133,14 @@ resource "boomi_data_integration_connection" "jira" {
   name = "Jira"
   type = "jira"
 
+  # Property names come from GET /v1/connections_types/jira — credentials_type
+  # "token" requires domain_name + username + api_token. There is no base_url
+  # and no password on this connector.
   parameters_json = jsonencode({
-    base_url = "https://yourorg.atlassian.net"
-    username = "user@example.com"
-    password = "..."
+    credentials_type = "token"
+    domain_name      = "yourorg" # bare subdomain, not a URL
+    username         = "user@example.com"
+    api_token        = "..."
   })
 }
 
@@ -158,11 +171,19 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
     source = {
       name          = "jira"
       connection_id = boomi_data_integration_connection.jira.id
-      # Jira exposes predefined reports rather than raw tables, so both the
-      # source run_type and each table's run_type_and_datasource below are
-      # "predefined_report". For an RDBMS source these would be "multi_tables".
-      run_type     = "predefined_report"
+      # An API connector pulling one named report uses run_type "regular"; the
+      # flow then writes to the single table named on the target. For an RDBMS
+      # source this would be "multi_tables" with a schemas[] table list.
+      run_type     = "regular"
       cdc_settings = null
+      additional_settings = {
+        connection_type = "jira"
+        # REQUIRED: the extraction worker asserts on `report`. Naming the report
+        # only as a predefined_report table's details.table_name does not
+        # populate this, and the run fails with `Missing Entity!`.
+        report         = "issue"
+        extract_method = "all"
+      }
     }
     target = {
       name          = "snowflake"
@@ -171,22 +192,10 @@ resource "boomi_data_integration_data_flow" "jira_issues" {
       loading_method = "overwrite"
       database_name  = "ANALYTICS"
       schema_name    = "PUBLIC"
+      # On a `regular` flow the destination table is named here.
+      table_name = "jira_issues"
     }
-    schemas = [{
-      name = "no_schema"
-      tables = [{
-        # Only "multi_tables" and "predefined_report" are accepted here — this
-        # field is the discriminator that selects the table schema.
-        run_type_and_datasource = "predefined_report"
-        details = {
-          table_name                 = "issues"
-          target_table               = "jira_issues"
-          is_selected                = true
-          extract_method             = "all"
-          additional_source_settings = { report_type = "full_table" }
-        }
-      }]
-    }]
+    schemas = []
   })
 }
 ```
@@ -324,9 +333,10 @@ resource "boomi_data_integration_connection" "api_source" {
   type = "jira"
 
   parameters_json = jsonencode({
-    base_url = "https://yourorg.atlassian.net"
-    username = "user@example.com"
-    password = "..."
+    credentials_type = "token"
+    domain_name      = "yourorg" # bare subdomain, not a URL
+    username         = "user@example.com"
+    api_token        = "..."
   })
 }
 
