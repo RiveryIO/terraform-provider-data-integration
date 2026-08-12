@@ -70,14 +70,13 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 			"(`get_db_metadata`, `get_schemas`, `get_databases`) are RDBMS verbs, so a SaaS/API " +
 			"connector (Jira, Shopify, Salesforce, …) rejects every one of them with the same 422 " +
 			"\"did not match any key in the pull-translate mapping for this datasource_id\"; the " +
-			"pull_requests route has no mapping for a SaaS datasource_id under any task name. The " +
-			"console CAN test these connections — its Test Connection button uses a different API " +
-			"surface — so this is a gap in what the v1 API exposes, not a missing capability. From " +
-			"Terraform, though, there is no pre-flight check for a SaaS connector " +
-			"(`boomi_data_integration_source_metadata` is RDBMS-only as well); budget a run to " +
-			"validate the credential. Note also that a passing Test Connection does not prove the " +
-			"credential can read data — a revoked Jira token has been observed passing the console " +
-			"test while its run finished `succeeded` with a warning and zero rows.\n\n" +
+			"pull_requests route has no mapping for a SaaS datasource_id under any task name. This " +
+			"is a current limitation rather than the intended contract — testing a connection is " +
+			"meant to behave uniformly across connector types, and the console already tests SaaS " +
+			"connections through a different API surface. Expect the gap to close. Until it does " +
+			"there is no pre-flight check for a SaaS connector from Terraform " +
+			"(`boomi_data_integration_source_metadata` is RDBMS-only as well), so validate such a " +
+			"credential with a run.\n\n" +
 			"This test is a live network call and it competes for platform workers. A test that " +
 			"completes in ~35s on its own can sit at operation status \"R\" past the 180s default when " +
 			"Terraform reads it concurrently with other live data sources, which it does by default. A " +

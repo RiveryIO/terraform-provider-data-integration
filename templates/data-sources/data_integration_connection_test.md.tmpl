@@ -59,29 +59,17 @@ The `pull_requests` route this data source is built on has no mapping for a
 SaaS `datasource_id` under any task name, so there is nothing to pass here
 instead.
 
--> **The console can still test these connections.** A SaaS connection's
-detail page has a working **Test Connection** button; it just runs through a
-different API surface than the `pull_requests` route available here. This is a
-gap in what the v1 API exposes, not a missing product capability — so do not
-conclude a SaaS connection is untestable just because this data source cannot
-test it.
+-> **This is a current limitation, not the intended contract.** Testing a
+connection is meant to work uniformly for every connector type. The console
+already tests SaaS connections through a different API surface; the
+`pull_requests` route this data source is built on has not caught up. Expect
+this gap to close — don't design around it permanently.
 
-What that leaves for Terraform: `boomi_data_integration_source_metadata` is
-RDBMS-only too (see
-[Schema & column mapping](../guides/metadata-and-schema)), so there is no
-pre-flight check for a SaaS connector **from Terraform**. Budget a run to
-validate the credential and read the run's `error_description`, rather than
+Until it does, `boomi_data_integration_source_metadata` is RDBMS-only as well
+(see [Schema & column mapping](../guides/metadata-and-schema)), so there is no
+pre-flight check for a SaaS connector **from Terraform**. Validate such a
+credential with a run and read the run's `error_description`, rather than
 expecting a bad credential to fail at `plan` or `apply`.
-
-~> **A passing Test Connection is not proof the credential can read data.**
-Observed on a Jira connection whose API token had been revoked: the console
-reported *Test Connection Passed!*, the flow activated, and the run finished
-`succeeded` **with a warning and zero rows** — `"No data retrieved from Jira.
-Please check your dates criteria, filters or credentials."` The same token
-returned `401` from Jira's own `/rest/api/3/myself`, while that site's
-`/rest/api/3/serverInfo` answers `200` with no authentication at all. Treat
-row counts in the target, not a green test, as the proof that a SaaS
-credential works.
 
 ## This is a live network call, and it can run during `plan`
 
