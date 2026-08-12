@@ -1005,6 +1005,60 @@ func TestDataFlowReadReconcilesActivate(t *testing.T) {
 	}
 }
 
+// TestDataFlowReadBackfillsSchedulersJSON proves schedulers_json's refresh
+// scoping: Read() (refresh=true) may backfill it from the live API when prior
+// state has it null, since Read() isn't part of the plan-vs-apply consistency
+// check the way Create/Update are -- a live schedule appearing against a
+// config that doesn't declare one is legitimate drift for the next plan to
+// surface, not a crash. This is deliberately narrower than the old backfill
+// this file used to have everywhere: Create/Update must never do this (see
+// TestDataFlowUpdateDisablesRiverBeforePropertiesChange's era of this file
+// for why doing it there caused a real "provider produced inconsistent
+// result after apply" failure).
+func TestDataFlowReadBackfillsSchedulersJSON(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+			`"type":"source_to_target","metadata":{"river_status":"active"},` +
+			`"schedulers":[{"cron_expression":"0 0/5 1/1 * *","is_enabled":true}]}`))
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	stateRaw := dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+		"id":              tftypes.NewValue(tftypes.String, "river1"),
+		"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+		"name":            tftypes.NewValue(tftypes.String, "flow"),
+		"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+		"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+		"properties_json": tftypes.NewValue(tftypes.String, batchProps),
+		"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+		"schedulers_json": tftypes.NewValue(tftypes.String, nil), // unset in config
+		"activate":        boolRaw(types.BoolValue(true)),
+		"status":          stringRaw(types.StringValue(riverStatusActive)),
+		"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+	})
+	resp := &resource.ReadResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
+	r.Read(ctx, resource.ReadRequest{State: tfsdk.State{Raw: stateRaw, Schema: s}}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	var got jsontypes.Normalized
+	resp.State.GetAttribute(ctx, path.Root("schedulers_json"), &got)
+	want := `[{"cron_expression":"0 0/5 1/1 * *","is_enabled":true}]`
+	if got.IsNull() || got.ValueString() != want {
+		t.Errorf("refreshed schedulers_json = %v, want %s", got, want)
+	}
+}
+
 // ── test helpers ──────────────────────────────────────────────────────────────
 
 func dataFlowSchemaForTest(t *testing.T) schema.Schema {

@@ -291,7 +291,7 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 		addAPIError(&resp.Diagnostics, "Error creating data flow", err)
 		return
 	}
-	resp.Diagnostics.Append(r.apply(created, envID, &plan)...)
+	resp.Diagnostics.Append(r.apply(created, envID, &plan, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -377,7 +377,7 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 		addAPIError(&resp.Diagnostics, "Error reading data flow", err)
 		return
 	}
-	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state)...)
+	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state, true)...)
 
 	// Refresh the activation state from the server. river_status rides along on
 	// the plain data flow GET, so observing activation costs no extra call and —
@@ -658,7 +658,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		addAPIError(&resp.Diagnostics, "Error updating data flow", err)
 		return
 	}
-	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
+	resp.Diagnostics.Append(r.apply(updated, envID, &plan, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -1080,7 +1080,7 @@ func dataFlowScheduleBody(s *dataFlowScheduleModel) map[string]any {
 
 // apply maps an API response onto the model, normalizing read shape so an
 // imported or refreshed data flow plans clean.
-func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowModel) diag.Diagnostics {
+func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowModel, refresh bool) diag.Diagnostics {
 	var diags diag.Diagnostics
 	m.ID = types.StringValue(asString(api["id"]))
 	m.EnvironmentID = types.StringValue(envID)
@@ -1151,11 +1151,27 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
-	// schedulers_json is Optional (not Computed) and config-authoritative, same
-	// as properties_json/settings_json: never synced back from the API. The
-	// actual live scheduler surviving a disable/re-enable-CDC round trip is
-	// handled separately and unconditionally by ensureSchedulersInBody, so
-	// nothing here needs to mirror it into Terraform state.
+	// schedulers_json is Optional (not Computed): Create/Update are subject to
+	// the plan-vs-apply consistency check, so if config leaves it null (a
+	// known planned value) their own response-handling must never report a
+	// different value back -- that's the exact "provider produced
+	// inconsistent result after apply" crash this file's history is full of.
+	//
+	// refresh (Read()-triggered) is NOT part of that contract -- it just syncs
+	// state to match reality, and a real live schedule showing up against a
+	// config that doesn't declare one is legitimate drift for the next plan
+	// to surface, not a crash. So backfill here, but only when refresh=true.
+	// (The live schedule surviving a disable/re-enable-CDC round trip is
+	// handled separately and unconditionally by ensureSchedulersInBody --
+	// this is purely about what Terraform state reports, not what actually
+	// happens to the API-side schedule.)
+	if refresh && (m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown()) {
+		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
+			if raw, err := json.Marshal(schedulers); err == nil {
+				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))
+			}
+		}
+	}
 	return diags
 }
 
