@@ -1398,3 +1398,195 @@ func TestValidateDataFlowExclusivityAllowsEitherAlone(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateDataFlowScheduleRequiredForCDC proves the one flow type where a
+// schedule genuinely isn't optional: CDC (log-based) flows must declare one,
+// via either representation. Every other run type may be created and left
+// unscheduled indefinitely — this must never fire for them.
+func TestValidateDataFlowScheduleRequiredForCDC(t *testing.T) {
+	cases := []struct {
+		name      string
+		props     string
+		schedule  *dataFlowScheduleModel
+		schedJSON jsontypes.Normalized
+		wantError bool
+	}{
+		{"CDC without a schedule errors", cdcProps, nil, jsontypes.NewNormalizedNull(), true},
+		{"CDC with a typed schedule is fine", cdcProps,
+			&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}, jsontypes.NewNormalizedNull(), false},
+		{"CDC with schedulers_json is fine", cdcProps,
+			nil, jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`), false},
+		{"non-CDC (incremental) without a schedule is fine", batchProps, nil, jsontypes.NewNormalizedNull(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseDataFlowModel()
+			cfg.PropertiesJSON = jsontypes.NewNormalizedValue(tc.props)
+			cfg.Schedule = tc.schedule
+			cfg.SchedulersJSON = tc.schedJSON
+
+			diags := validateDataFlowScheduleRequiredForCDC(cfg)
+			if diags.HasError() != tc.wantError {
+				t.Fatalf("HasError() = %v, want %v (diags: %v)", diags.HasError(), tc.wantError, diags)
+			}
+			if tc.wantError {
+				if s := diags.Errors()[0].Summary(); s != "CDC (log-based) data flows require a schedule" {
+					t.Fatalf("unexpected diagnostic summary: %q", s)
+				}
+			}
+		})
+	}
+}
+
+// TestScheduleRemovalNeeded proves the pure removal-detection decision:
+// only a config transition from managed to unmanaged counts as a real
+// removal. Never having been managed is left alone, and staying managed
+// (config still declares a schedule) is not a removal either.
+func TestScheduleRemovalNeeded(t *testing.T) {
+	cases := []struct {
+		name            string
+		wasManaged      bool
+		scheduleManaged bool
+		want            bool
+	}{
+		{"was managed, now isn't -- a real removal", true, false, true},
+		{"never managed, still isn't -- leave it alone", false, false, false},
+		{"was managed, still is -- not a removal", true, true, false},
+		{"wasn't managed, now is -- a new schedule, not a removal", false, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scheduleRemovalNeeded(tc.wasManaged, tc.scheduleManaged); got != tc.want {
+				t.Errorf("scheduleRemovalNeeded(%v, %v) = %v, want %v",
+					tc.wasManaged, tc.scheduleManaged, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestScheduleConfigured proves scheduleConfigured recognizes config
+// declaring a schedule via either representation, and only that.
+func TestScheduleConfigured(t *testing.T) {
+	cases := []struct {
+		name      string
+		schedule  *dataFlowScheduleModel
+		schedJSON jsontypes.Normalized
+		want      bool
+	}{
+		{"neither set", nil, jsontypes.NewNormalizedNull(), false},
+		{"typed schedule set", &dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}, jsontypes.NewNormalizedNull(), true},
+		{"schedulers_json set", nil, jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`), true},
+		{"schedulers_json unknown counts as unset", nil, jsontypes.NewNormalizedUnknown(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := baseDataFlowModel()
+			m.Schedule = tc.schedule
+			m.SchedulersJSON = tc.schedJSON
+			if got := scheduleConfigured(m); got != tc.want {
+				t.Errorf("scheduleConfigured() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDataFlowApplyScheduleReconciliation proves apply()'s two schedule
+// behaviors directly: scheduleManaged=true leaves schedulers_json exactly as
+// the caller set it (config wins, no live sync), and scheduleManaged=false
+// reflects the live API value unconditionally -- a real schedule when one
+// exists, and null when the API reports none (not left stale from a prior
+// value).
+func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
+	r := &dataFlowResource{}
+	apiWithSchedule := map[string]any{
+		"id": "river1", "name": "flow", "kind": "main_river", "type": "source_to_target",
+		"schedulers": []any{map[string]any{"cron_expression": "0 * * * *", "is_enabled": true}},
+	}
+	apiWithoutSchedule := map[string]any{
+		"id": "river1", "name": "flow", "kind": "main_river", "type": "source_to_target",
+	}
+
+	t.Run("managed: config value is left untouched", func(t *testing.T) {
+		m := baseDataFlowModel()
+		configValue := `[{"cron_expression":"0 0 * * *","is_enabled":true}]`
+		m.SchedulersJSON = jsontypes.NewNormalizedValue(configValue)
+		if diags := r.apply(apiWithSchedule, "env1", &m, true); diags.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", diags)
+		}
+		if m.SchedulersJSON.ValueString() != configValue {
+			t.Errorf("schedulers_json = %q, want config value %q left untouched",
+				m.SchedulersJSON.ValueString(), configValue)
+		}
+	})
+
+	t.Run("unmanaged: reflects a real live schedule", func(t *testing.T) {
+		m := baseDataFlowModel()
+		if diags := r.apply(apiWithSchedule, "env1", &m, false); diags.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", diags)
+		}
+		want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
+		if m.SchedulersJSON.IsNull() || m.SchedulersJSON.ValueString() != want {
+			t.Errorf("schedulers_json = %v, want %s", m.SchedulersJSON, want)
+		}
+	})
+
+	t.Run("unmanaged: reflects no live schedule as null, not stale", func(t *testing.T) {
+		m := baseDataFlowModel()
+		m.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"cron_expression":"0 * * * *","is_enabled":true}]`)
+		if diags := r.apply(apiWithoutSchedule, "env1", &m, false); diags.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", diags)
+		}
+		if !m.SchedulersJSON.IsNull() {
+			t.Errorf("schedulers_json = %v, want null once the API reports no schedule", m.SchedulersJSON)
+		}
+	})
+}
+
+// TestDataFlowUpdateSendsExplicitRemovalOnTransition proves the Update()-level
+// wiring: when scheduleRemovalNeeded's condition holds, the PUT body carries
+// an explicit empty schedulers list, not an omitted key -- the only way to
+// tell the API to actually clear an existing schedule (an omitted key is
+// read as "leave it alone" by the API's deep-merge PUT). wasManaged can't be
+// driven true through req.Private in this test harness (see
+// writeScheduleManaged), so this exercises buildBody + the explicit-clear
+// assignment directly, the same way Update() composes them.
+func TestDataFlowUpdateSendsExplicitRemovalOnTransition(t *testing.T) {
+	s := dataFlowSchemaForTest(t)
+	planRaw := dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+		"id":              tftypes.NewValue(tftypes.String, "river1"),
+		"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+		"name":            tftypes.NewValue(tftypes.String, "flow"),
+		"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+		"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+		"properties_json": tftypes.NewValue(tftypes.String, batchProps),
+		"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+		"schedulers_json": tftypes.NewValue(tftypes.String, nil), // just removed from config
+		"activate":        boolRaw(types.BoolValue(true)),
+		"status":          stringRaw(types.StringValue(riverStatusActive)),
+		"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+	})
+	var plan dataFlowModel
+	var diags diag.Diagnostics
+	diags.Append(tfsdk.Plan{Raw: planRaw, Schema: s}.Get(context.Background(), &plan)...)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+
+	r := &dataFlowResource{}
+	body, ok := r.buildBody(plan, nil, &diags)
+	if !ok {
+		t.Fatalf("buildBody failed: %v", diags)
+	}
+	if scheduleRemovalNeeded(true, scheduleConfigured(plan)) {
+		body["schedulers"] = []any{}
+	}
+
+	schedulers, present := body["schedulers"]
+	if !present {
+		t.Fatal("expected an explicit \"schedulers\" key in the PUT body, got none (an omitted key leaves the live schedule untouched)")
+	}
+	list, ok := schedulers.([]any)
+	if !ok || len(list) != 0 {
+		t.Errorf("body[\"schedulers\"] = %#v, want an explicit empty list", schedulers)
+	}
+}
