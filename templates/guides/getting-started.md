@@ -260,6 +260,40 @@ terraform {
 
 ---
 
+## Troubleshooting
+
+### The provider behaves nothing like these docs
+
+Wrong error shapes, resources that should exist and don't, or a binary that
+clearly isn't the published one — check for a CLI config overriding provider
+installation before concluding the provider is broken:
+
+```bash
+cat ~/.terraformrc   # look for provider_installation { dev_overrides { ... } }
+```
+
+A leftover `dev_overrides` entry for this provider's address silently repoints
+every `terraform` invocation at a local binary. There is no warning and no
+error; it just behaves oddly.
+
+**Match the address exactly before blaming it.** `dev_overrides` keys are
+provider *addresses*, so an entry for a similarly-named but different address
+does not affect you. Confirm the key is the address in your `required_providers`
+block before acting on it.
+
+To override for one project without editing the shared global file:
+
+```hcl
+# .terraformrc.project
+provider_installation {
+  direct {}
+}
+```
+
+```bash
+export TF_CLI_CONFIG_FILE="$(pwd)/.terraformrc.project"
+```
+
 ## Examples
 
 Every runnable example in the repo, organized by topic, is indexed in the
