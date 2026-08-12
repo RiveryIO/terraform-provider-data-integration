@@ -599,11 +599,32 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// (_validate_locked_properties_for_active_river server-side,
 	// LOCKED_PROPERTIES_FOR_ACTIVE_RIVER = ['properties']) -- API error 400:
 	// "can not update properties for an active data flow. Please disable the
-	// data flow and try again". Reproduced live: an unchanged-properties PUT
-	// succeeds while active+CDC, but a genuine properties change 400s with
-	// this exact message. needsDisableForLockedProperties is structural
-	// (isCDCFlow/propertiesChanging), not a state-transition check like
-	// wasActive/wantActive, so it carries none of that staleness risk.
+	// data flow and try again".
+	//
+	// needsDisableForLockedProperties fires for ANY active CDC flow, not just
+	// when propertiesChanging (plan.PropertiesJSON != state.PropertiesJSON).
+	// A propertiesChanging-gated version was tried and reproduced live: an
+	// update whose only real change was schedulers_json (properties byte-for-
+	// byte identical to state) still hit this exact 400. Cause: buildBody's
+	// properties is config-authoritative and always overwrites the server's
+	// copy verbatim (see UpdateDataFlow's deep-merge override), but the API
+	// silently enriches properties server-side with fields config never sets
+	// (e.g. additional_source_settings/additional_target_settings, observed
+	// on a sibling CDC flow's plan). So a PUT we consider a no-op can still be
+	// a real change from the API's perspective, and propertiesChanging -- a
+	// comparison against Terraform's own remembered state, which by design
+	// never refreshes properties_json from the API -- has no way to see that
+	// drift. Unconditionally disabling for any active CDC flow sidesteps the
+	// whole detection problem instead of trying to fix it.
+	//
+	// LIMITATION: this still reads wasActive (state.Activate), a plan-time
+	// snapshot that can be stale by apply-time if the flow's real activation
+	// changed in between (the same staleness class documented for the
+	// wasActive && !wantActive branch above) -- e.g. wasActive reads false
+	// right after a plan, but the flow is reactivated (by us or by someone
+	// else) before this apply runs, and this branch never fires even though
+	// the live flow is now active+CDC. Not fixed here; accepted the same way
+	// the deactivation branch above already accepts it.
 	//
 	// Before disabling, capture the flow's live scheduler and reinject it
 	// into the PUT body when config doesn't already supply one (via the
@@ -613,8 +634,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	// guarantee it matches what the customer actually configured, only that
 	// *some* scheduler ends up present.
 	isCurrentlyCDC := isCDCFlow(state.PropertiesJSON.ValueString())
-	propertiesChanging := plan.PropertiesJSON.ValueString() != state.PropertiesJSON.ValueString()
-	needsDisableForLockedProperties := isCurrentlyCDC && propertiesChanging
+	needsDisableForLockedProperties := isCurrentlyCDC && wasActive
 
 	deactivated := false
 	if !isLogic && (wasActive && !wantActive || needsDisableForLockedProperties) {
