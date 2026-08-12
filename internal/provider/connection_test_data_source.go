@@ -66,17 +66,6 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 			"only the warehouse's own listing verb is accepted (e.g. `get_databases` for Snowflake); " +
 			"`get_db_metadata` is rejected with a 422 \"did not match any key in the pull-translate " +
 			"mapping for this datasource_id\".\n\n" +
-			"This data source only tests DATABASE connections. All three of its tasks " +
-			"(`get_db_metadata`, `get_schemas`, `get_databases`) are RDBMS verbs, so a SaaS/API " +
-			"connector (Jira, Shopify, Salesforce, …) rejects every one of them with the same 422 " +
-			"\"did not match any key in the pull-translate mapping for this datasource_id\"; the " +
-			"pull_requests route has no mapping for a SaaS datasource_id under any task name. This " +
-			"is a current limitation rather than the intended contract — testing a connection is " +
-			"meant to behave uniformly across connector types, and the console already tests SaaS " +
-			"connections through a different API surface. Expect the gap to close. Until it does " +
-			"there is no pre-flight check for a SaaS connector from Terraform " +
-			"(`boomi_data_integration_source_metadata` is RDBMS-only as well), so validate such a " +
-			"credential with a run.\n\n" +
 			"This test is a live network call and it competes for platform workers. A test that " +
 			"completes in ~35s on its own can sit at operation status \"R\" past the 180s default when " +
 			"Terraform reads it concurrently with other live data sources, which it does by default. A " +

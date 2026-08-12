@@ -4,7 +4,6 @@ subcategory: "Connections"
 description: |-
   Tests whether an existing connection can actually reach its source/target and authenticate, by having the platform open a real connection to it and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead success is false and error_message carries the real connector error (e.g. an ORA-* code). Assert on success in a lifecycle precondition/check block if you want a bad connection to fail the plan.
   task_type defaults to "source" — this tests whether the connection can be PULLED FROM, not whether it can be pushed to. For a data-warehouse connection used as a data flow's TARGET (Snowflake, BigQuery, Databricks), that default is the wrong check: the API rejects a warehouse tested as a source with a 400 "The connection does not match to the provided connection_type" — and because that is a hard error, not success = false, a postcondition on self.success never even runs; error_message is left empty and the actual failure surfaces as a provider error instead. Use boomi_data_integration_target_metadata to check a warehouse target instead — it issues the correct task_type = "target" request and doubles as reachability plus a live list of its databases/datasets/catalogs. If you do set task_type = "target" here directly, only the warehouse's own listing verb is accepted (e.g. get_databases for Snowflake); get_db_metadata is rejected with a 422 "did not match any key in the pull-translate mapping for this datasource_id".
-  This data source only tests DATABASE connections. All three of its tasks (get_db_metadata, get_schemas, get_databases) are RDBMS verbs, so a SaaS/API connector (Jira, Shopify, Salesforce, …) rejects every one of them with the same 422 "did not match any key in the pull-translate mapping for this datasource_id"; the pull_requests route has no mapping for a SaaS datasource_id under any task name. This is a current limitation rather than the intended contract — testing a connection is meant to behave uniformly across connector types, and the console already tests SaaS connections through a different API surface. Expect the gap to close. Until it does there is no pre-flight check for a SaaS connector from Terraform (boomi_data_integration_source_metadata is RDBMS-only as well), so validate such a credential with a run.
   This test is a live network call and it competes for platform workers. A test that completes in ~35s on its own can sit at operation status "R" past the 180s default when Terraform reads it concurrently with other live data sources, which it does by default. A timeout here is a hard provider error, not success = false, so a postcondition cannot catch it — raise timeout_seconds, run with -parallelism=1, or prefer boomi_data_integration_source_metadata, which proves the same connection AND returns the schema mapping the data flow needs, replacing this test rather than adding to it.
 ---
 
@@ -75,34 +74,6 @@ reachability check plus a live list of the warehouse's databases/datasets/catalo
 If you set `task_type = "target"` here directly anyway, only the warehouse's own listing verb is
 accepted (e.g. `get_databases` for Snowflake) — `task = "get_db_metadata"` (the default) is rejected
 with a `422 "did not match any key in the pull-translate mapping for this datasource_id"`.
-
-## This tests DATABASE connections only
-
-All three of this data source's tasks — `get_db_metadata` (the default),
-`get_schemas` and `get_databases` — are RDBMS verbs. Point it at a SaaS/API
-connector (Jira, Shopify, Salesforce, …) and every one of them is rejected:
-
-```
-API error 422: {"detail":[{"type":"value_error","loc":["body"],
- "msg":"Value error, task: 'get_db_metadata' did not match any key in the
-  pull-translate mapping for this datasource_id", …}]}
-```
-
-The `pull_requests` route this data source is built on has no mapping for a
-SaaS `datasource_id` under any task name, so there is nothing to pass here
-instead.
-
--> **This is a current limitation, not the intended contract.** Testing a
-connection is meant to work uniformly for every connector type. The console
-already tests SaaS connections through a different API surface; the
-`pull_requests` route this data source is built on has not caught up. Expect
-this gap to close — don't design around it permanently.
-
-Until it does, `boomi_data_integration_source_metadata` is RDBMS-only as well
-(see [Schema & column mapping](../guides/metadata-and-schema)), so there is no
-pre-flight check for a SaaS connector **from Terraform**. Validate such a
-credential with a run and read the run's `error_description`, rather than
-expecting a bad credential to fail at `plan` or `apply`.
 
 ## This is a live network call, and it can run during `plan`
 
