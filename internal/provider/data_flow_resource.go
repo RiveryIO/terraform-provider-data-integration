@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -51,6 +52,7 @@ type dataFlowModel struct {
 	Activate       types.Bool             `tfsdk:"activate"`
 	Status         types.String           `tfsdk:"status"`
 	StepIDs        types.List             `tfsdk:"step_ids"`
+	Cursors        types.Map              `tfsdk:"cursors"`
 }
 
 // dataFlowSettingsModel mirrors the API's RiverSettings schema, which has
@@ -258,6 +260,16 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					"and preserved across updates. Positional: index 0 is the first step. Empty for " +
 					"non-logic data flows. See \"Logic data flows\" below.",
 				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
+			"cursors": schema.MapAttribute{
+				ElementType: types.StringType,
+				Computed:    true,
+				Description: "Live cursor values for incremental data flows, as observed from the server. " +
+					"Fields such as start_date are advanced by the server after each successful run and " +
+					"are not managed by Terraform — Terraform will never reset them. Use this attribute " +
+					"to observe the current cursor position (e.g. in outputs or monitoring). " +
+					"Empty for non-incremental data flows.",
+				PlanModifiers: []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -1239,6 +1251,21 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 	if m.StepIDs.IsNull() || m.StepIDs.IsUnknown() {
 		m.StepIDs = stepIDsToList(nil)
 	}
+
+	// cursors — read the live cursor values that the server advances at runtime.
+	// Always server-authoritative: we never let the user set these, and we never
+	// preserve state across reads — the server value is always the true position.
+	cursorAttrs := map[string]attr.Value{}
+	if addl := apiAdditionalSettings(api); addl != nil {
+		for _, field := range cursorFields {
+			if v, ok := addl[field]; ok {
+				cursorAttrs[field] = types.StringValue(fmt.Sprintf("%v", v))
+			}
+		}
+	}
+	// MapValue only errors when element types mismatch — impossible here since
+	// every value is types.StringValue and the declared element type is StringType.
+	m.Cursors, _ = types.MapValue(types.StringType, cursorAttrs)
 
 	// properties_json / settings_json are config-authoritative JSON passthrough.
 	// The API enriches them on write (logic_steps gain step_id/is_enabled/…,

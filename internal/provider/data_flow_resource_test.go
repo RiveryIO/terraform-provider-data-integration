@@ -1034,6 +1034,22 @@ func TestPreserveServerCursors(t *testing.T) {
 	if got != want {
 		t.Errorf("PUT body start_date = %q, want %q (server cursor must be preserved)", got, want)
 	}
+
+	// Verify the cursors attribute in the resulting state reflects the server's
+	// live value — this is how users observe the current cursor position.
+	var result dataFlowModel
+	resp.Diagnostics.Append(resp.State.Get(ctx, &result)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("reading result state: %v", resp.Diagnostics)
+	}
+	elems := result.Cursors.Elements()
+	gotCursor, ok := elems["start_date"]
+	if !ok {
+		t.Fatalf("cursors attribute missing start_date; got %v", elems)
+	}
+	if gotCursor.String() != `"2026-08-11 00:00:00"` {
+		t.Errorf("cursors[start_date] = %s, want %q", gotCursor, "2026-08-11 00:00:00")
+	}
 }
 
 // TestPreserveServerCursorsSkipsGetWhenCursorChanged verifies that when the
