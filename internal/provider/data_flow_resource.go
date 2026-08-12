@@ -558,6 +558,19 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	// Preserve server-owned cursor fields that the user has not deliberately
+	// changed in HCL. Without this, every apply resets the incremental cursor
+	// (e.g. start_date) to the static config-declared value even after the
+	// server has advanced it, causing a full re-ingest — see CORE-2448.
+	//
+	// TODO(CORE-2448): remove this GET-before-PUT workaround once the API
+	// exposes a PATCH endpoint. With PATCH, cursor fields are simply omitted
+	// from the request body rather than being read back and re-injected here.
+	if !r.preserveServerCursors(ctx, envID, plan.ID.ValueString(), body,
+		plan.PropertiesJSON.ValueString(), state.PropertiesJSON.ValueString(), &resp.Diagnostics) {
+		return
+	}
+
 	// Detect transition to CDC (log-based) extract method. When switching to log,
 	// the API validator requires a scheduler in the PUT body. We fetch the existing
 	// schedulers from the GET response and inject them so the validator passes.
@@ -942,6 +955,109 @@ func (r *dataFlowResource) ensureSchedulersInBody(
 		body["schedulers"] = schedulers
 	}
 	return true
+}
+
+// cursorFields lists the fields inside source.additional_settings that the
+// server advances at runtime. Terraform must not reset them on a plain update
+// when the user has not changed them in HCL — see CORE-2448.
+//
+// TODO(CORE-2448): remove once the API exposes a PATCH endpoint.
+var cursorFields = []string{"start_date", "date_range"}
+
+// preserveServerCursors reads cursor fields from the live server and re-injects
+// them into the PUT body for any field whose value is identical in the plan and
+// in state (meaning the user did not deliberately change it in HCL).
+// Returns false (and appends a diagnostic) only on a GET error.
+func (r *dataFlowResource) preserveServerCursors(
+	ctx context.Context, envID, id string, body map[string]any,
+	planJSON, stateJSON string, diags *diag.Diagnostics,
+) bool {
+	planCursors := extractCursors(planJSON)
+	stateCursors := extractCursors(stateJSON)
+
+	// Collect fields the user did not explicitly change (plan value == state value).
+	// Skip fields absent from the plan entirely — those are not HCL-managed
+	// cursor fields, so there is nothing to preserve.
+	var unchanged []string
+	for _, field := range cursorFields {
+		planVal, inPlan := planCursors[field]
+		if !inPlan {
+			continue
+		}
+		if planVal == stateCursors[field] {
+			unchanged = append(unchanged, field)
+		}
+	}
+	if len(unchanged) == 0 {
+		return true // every cursor field was intentionally updated
+	}
+
+	current, err := r.data.client.GetDataFlow(ctx, envID, id)
+	if err != nil {
+		addAPIError(diags, "Error reading data flow cursors before update", err)
+		return false
+	}
+
+	// Read the server's live cursor values from the already-parsed API map —
+	// not from re-serialising it to JSON — so the values are Go types that can
+	// be stored in body without an extra encode/decode round-trip.
+	apiAddl := apiAdditionalSettings(current)
+
+	// Navigate to source.additional_settings inside the body and patch in the
+	// server's live cursor values for fields the user left untouched.
+	props, _ := body["properties"].(map[string]any)
+	if props == nil {
+		return true
+	}
+	source, _ := props["source"].(map[string]any)
+	if source == nil {
+		return true
+	}
+	addl, _ := source["additional_settings"].(map[string]any)
+	if addl == nil {
+		return true
+	}
+	for _, field := range unchanged {
+		if sv, ok := apiAddl[field]; ok {
+			addl[field] = sv
+		}
+	}
+	return true
+}
+
+// apiAdditionalSettings drills into properties.source.additional_settings of
+// an API response body and returns the map, or nil if the path is absent.
+func apiAdditionalSettings(api map[string]any) map[string]any {
+	props, _ := api["properties"].(map[string]any)
+	if props == nil {
+		return nil
+	}
+	source, _ := props["source"].(map[string]any)
+	if source == nil {
+		return nil
+	}
+	addl, _ := source["additional_settings"].(map[string]any)
+	return addl
+}
+
+// extractCursors parses a properties JSON blob and returns the raw JSON
+// representation of each cursor field found under source.additional_settings.
+func extractCursors(propertiesJSON string) map[string]string {
+	out := make(map[string]string, len(cursorFields))
+	var props struct {
+		Source struct {
+			AdditionalSettings map[string]json.RawMessage `json:"additional_settings"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(propertiesJSON), &props); err != nil {
+		return out
+	}
+	for _, field := range cursorFields {
+		if raw, ok := props.Source.AdditionalSettings[field]; ok {
+			out[field] = string(raw)
+		}
+	}
+	return out
 }
 
 // ── typed settings / schedule ─────────────────────────────────────────────────

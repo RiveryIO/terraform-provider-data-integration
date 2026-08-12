@@ -945,6 +945,161 @@ func TestDataFlowUpdateDeactivationDisablesRiverOnce(t *testing.T) {
 	}
 }
 
+// TestPreserveServerCursors verifies the CORE-2448 fix: when start_date is
+// the same in plan and state (user has not changed it in HCL), a GET is issued
+// before the PUT and the server's live cursor value is substituted into the PUT
+// body so the incremental cursor is not reset.
+func TestPreserveServerCursors(t *testing.T) {
+	// Minimal incremental source/target properties JSON.  Both plan and state
+	// declare start_date = "2026-01-01 00:00:00" — the value the user wrote in
+	// HCL. The server (via GET) has advanced the cursor to "2026-08-11 00:00:00".
+	const hclDate = `"2026-01-01 00:00:00"`
+	const serverDate = `"2026-08-11 00:00:00"`
+	makeProps := func(startDate string) string {
+		return `{"properties_type":"source_to_target","source":{"additional_settings":` +
+			`{"extract_method":"incremental","start_date":` + startDate + `}}}`
+	}
+	planProps := makeProps(hclDate)
+	stateProps := makeProps(hclDate) // same as plan → cursor was not changed in HCL
+
+	ctx := context.Background()
+	var calls []string
+	var putBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method == http.MethodPut {
+			_ = json.NewDecoder(req.Body).Decode(&putBody)
+		}
+		// GET returns the server-advanced cursor value inside properties.
+		serverResp := `{"cross_id":"river1","name":"flow","kind":"main_river",` +
+			`"type":"source_to_target","metadata":{"river_status":"disabled"},` +
+			`"properties":{"source":{"additional_settings":{"extract_method":"incremental",` +
+			`"start_date":` + serverDate + `}}}}`
+		_, _ = w.Write([]byte(serverResp))
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(props string) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, props),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+			"activate":        boolRaw(types.BoolValue(false)),
+			"status":          stringRaw(types.StringValue("disabled")),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: build(stateProps), Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: build(planProps), Schema: s},
+		State: tfsdk.State{Raw: build(stateProps), Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	// Two GETs: first from preserveServerCursors (cursor read), second from
+	// UpdateDataFlow's internal merge-GET before the PUT.
+	wantCalls := []string{
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+	}
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
+	}
+
+	// Verify the PUT body carried the server's cursor, not the HCL-declared one.
+	props, _ := putBody["properties"].(map[string]any)
+	source, _ := props["source"].(map[string]any)
+	addl, _ := source["additional_settings"].(map[string]any)
+	got, _ := addl["start_date"].(string)
+	want := "2026-08-11 00:00:00"
+	if got != want {
+		t.Errorf("PUT body start_date = %q, want %q (server cursor must be preserved)", got, want)
+	}
+}
+
+// TestPreserveServerCursorsSkipsGetWhenCursorChanged verifies that when the
+// user deliberately changes start_date in HCL (plan != state), no extra GET
+// is issued — the new value goes straight into the PUT.
+func TestPreserveServerCursorsSkipsGetWhenCursorChanged(t *testing.T) {
+	makeProps := func(startDate string) string {
+		return `{"properties_type":"source_to_target","source":{"additional_settings":` +
+			`{"extract_method":"incremental","start_date":"` + startDate + `"}}}`
+	}
+	planProps := makeProps("2026-03-01 00:00:00")  // user changed to March
+	stateProps := makeProps("2026-01-01 00:00:00") // state had January
+
+	ctx := context.Background()
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cross_id":"river1","name":"flow","kind":"main_river",` +
+			`"type":"source_to_target","metadata":{"river_status":"disabled"}}`))
+	}))
+	defer srv.Close()
+
+	c, err := client.New(client.Config{BaseURL: srv.URL, Token: "t", AccountID: "acc"})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
+	s := dataFlowSchemaForTest(t)
+
+	build := func(props string) tftypes.Value {
+		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
+			"id":              tftypes.NewValue(tftypes.String, "river1"),
+			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
+			"name":            tftypes.NewValue(tftypes.String, "flow"),
+			"kind":            tftypes.NewValue(tftypes.String, "main_river"),
+			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
+			"properties_json": tftypes.NewValue(tftypes.String, props),
+			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
+			"schedulers_json": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+			"activate":        boolRaw(types.BoolValue(false)),
+			"status":          stringRaw(types.StringValue("disabled")),
+			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+		})
+	}
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: build(stateProps), Schema: s}}
+	r.Update(ctx, resource.UpdateRequest{
+		Plan:  tfsdk.Plan{Raw: build(planProps), Schema: s},
+		State: tfsdk.State{Raw: build(stateProps), Schema: s},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+	// No preserveServerCursors GET (cursor was intentionally changed).
+	// UpdateDataFlow still does its own internal merge-GET before the PUT.
+	wantCalls := []string{
+		"GET /v1/accounts/acc/environments/env1/rivers/river1",
+		"PUT /v1/accounts/acc/environments/env1/rivers/river1",
+	}
+	if diff := diffStrings(calls, wantCalls); diff != "" {
+		t.Errorf("API call sequence mismatch:\n%s", diff)
+	}
+}
+
 // TestDataFlowReadReconcilesActivate proves the refresh side of the state
 // machine: river_status lands on both status and activate, and an absent
 // river_status changes neither.
