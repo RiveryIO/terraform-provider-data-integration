@@ -263,11 +263,15 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"cursors": schema.MapAttribute{
 				ElementType: types.StringType,
+				Optional:    true,
 				Computed:    true,
-				Description: "Live cursor values for incremental data flows, as observed from the server. " +
-					"Fields such as start_date are advanced by the server after each successful run and " +
-					"are not managed by Terraform — Terraform will never reset them. Use this attribute " +
-					"to observe the current cursor position (e.g. in outputs or monitoring). " +
+				Description: "Incremental cursor values (start_date, date_range). " +
+					"When omitted, the server owns these fields and advances them after each successful run — " +
+					"Terraform reads and exposes the live value but never resets it. " +
+					"When set explicitly, Terraform issues a PATCH to update only the named cursor fields, " +
+					"leaving all other data flow properties untouched. " +
+					"Use this to deliberately reset a cursor (e.g. to re-ingest from an earlier date) " +
+					"without changing connector configuration. " +
 					"Empty for non-incremental data flows.",
 				PlanModifiers: []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
 			},
@@ -570,17 +574,29 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Preserve server-owned cursor fields that the user has not deliberately
-	// changed in HCL. Without this, every apply resets the incremental cursor
-	// (e.g. start_date) to the static config-declared value even after the
-	// server has advanced it, causing a full re-ingest — see CORE-2448.
-	//
-	// TODO(CORE-2448): remove this GET-before-PUT workaround once the API
-	// exposes a PATCH endpoint. With PATCH, cursor fields are simply omitted
-	// from the request body rather than being read back and re-injected here.
-	if !r.preserveServerCursors(ctx, envID, plan.ID.ValueString(), body,
-		plan.PropertiesJSON.ValueString(), state.PropertiesJSON.ValueString(), &resp.Diagnostics) {
-		return
+	// Cursor fields (start_date, date_range) are server-owned at runtime — the
+	// server advances them after each successful run. Strip them from the PUT
+	// body so a plain apply never resets the incremental position. When the
+	// user explicitly sets the `cursors` attribute in HCL, a PATCH call below
+	// writes only those fields, leaving everything else untouched.
+	stripCursorsFromBody(body)
+
+	// If the user explicitly set cursors in HCL and the value differs from
+	// state, issue a PATCH to update only the cursor fields.
+	patchedCursors := false
+	if !plan.Cursors.IsNull() && !plan.Cursors.IsUnknown() && !plan.Cursors.Equal(state.Cursors) {
+		cursorMap := tfMapToStringMap(plan.Cursors)
+		patched, err := r.data.client.PatchDataFlowCursors(ctx, envID, plan.ID.ValueString(), cursorMap)
+		if err != nil {
+			addAPIError(&resp.Diagnostics, "Error patching data flow cursors", err)
+			return
+		}
+		// If the PATCH response carries updated additional_settings, adopt them
+		// as the new cursor state; otherwise trust what we sent.
+		if addl := apiAdditionalSettings(patched); addl != nil {
+			plan.Cursors = cursorsFromAddlSettings(addl)
+		}
+		patchedCursors = true
 	}
 
 	// Detect transition to CDC (log-based) extract method. When switching to log,
@@ -686,6 +702,15 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// apply() populates cursors from the PUT response body. When cursor fields
+	// were stripped from the PUT body the server may not echo them back, leaving
+	// Cursors empty in the model. Restore the right value:
+	//   - PATCH was issued  → plan.Cursors already holds the patched value (set above)
+	//   - No PATCH, no change → preserve the previous state so the attribute is stable
+	if !patchedCursors {
+		plan.Cursors = state.Cursors
 	}
 
 	// CDC must be enabled before a CDC data flow can run: the operation sets
@@ -969,72 +994,21 @@ func (r *dataFlowResource) ensureSchedulersInBody(
 	return true
 }
 
-// cursorFields lists the fields inside source.additional_settings that the
-// server advances at runtime. Terraform must not reset them on a plain update
-// when the user has not changed them in HCL — see CORE-2448.
-//
-// TODO(CORE-2448): remove once the API exposes a PATCH endpoint.
+// cursorFields lists the source.additional_settings fields the server advances
+// at runtime. They are excluded from PUT bodies and managed exclusively via the
+// `cursors` attribute + PATCH endpoint.
 var cursorFields = []string{"start_date", "date_range"}
 
-// preserveServerCursors reads cursor fields from the live server and re-injects
-// them into the PUT body for any field whose value is identical in the plan and
-// in state (meaning the user did not deliberately change it in HCL).
-// Returns false (and appends a diagnostic) only on a GET error.
-func (r *dataFlowResource) preserveServerCursors(
-	ctx context.Context, envID, id string, body map[string]any,
-	planJSON, stateJSON string, diags *diag.Diagnostics,
-) bool {
-	planCursors := extractCursors(planJSON)
-	stateCursors := extractCursors(stateJSON)
-
-	// Collect fields the user did not explicitly change (plan value == state value).
-	// Skip fields absent from the plan entirely — those are not HCL-managed
-	// cursor fields, so there is nothing to preserve.
-	var unchanged []string
-	for _, field := range cursorFields {
-		planVal, inPlan := planCursors[field]
-		if !inPlan {
-			continue
-		}
-		if planVal == stateCursors[field] {
-			unchanged = append(unchanged, field)
-		}
-	}
-	if len(unchanged) == 0 {
-		return true // every cursor field was intentionally updated
-	}
-
-	current, err := r.data.client.GetDataFlow(ctx, envID, id)
-	if err != nil {
-		addAPIError(diags, "Error reading data flow cursors before update", err)
-		return false
-	}
-
-	// Read the server's live cursor values from the already-parsed API map —
-	// not from re-serialising it to JSON — so the values are Go types that can
-	// be stored in body without an extra encode/decode round-trip.
-	apiAddl := apiAdditionalSettings(current)
-
-	// Navigate to source.additional_settings inside the body and patch in the
-	// server's live cursor values for fields the user left untouched.
-	props, _ := body["properties"].(map[string]any)
-	if props == nil {
-		return true
-	}
-	source, _ := props["source"].(map[string]any)
-	if source == nil {
-		return true
-	}
-	addl, _ := source["additional_settings"].(map[string]any)
+// stripCursorsFromBody removes cursor fields from the PUT body so a plain
+// apply never resets the incremental position the server has advanced.
+func stripCursorsFromBody(body map[string]any) {
+	addl := apiAdditionalSettings(body)
 	if addl == nil {
-		return true
+		return
 	}
-	for _, field := range unchanged {
-		if sv, ok := apiAddl[field]; ok {
-			addl[field] = sv
-		}
+	for _, field := range cursorFields {
+		delete(addl, field)
 	}
-	return true
 }
 
 // apiAdditionalSettings drills into properties.source.additional_settings of
@@ -1052,21 +1026,25 @@ func apiAdditionalSettings(api map[string]any) map[string]any {
 	return addl
 }
 
-// extractCursors parses a properties JSON blob and returns the raw JSON
-// representation of each cursor field found under source.additional_settings.
-func extractCursors(propertiesJSON string) map[string]string {
-	out := make(map[string]string, len(cursorFields))
-	var props struct {
-		Source struct {
-			AdditionalSettings map[string]json.RawMessage `json:"additional_settings"`
-		} `json:"source"`
-	}
-	if err := json.Unmarshal([]byte(propertiesJSON), &props); err != nil {
-		return out
-	}
+// cursorsFromAddlSettings builds a types.Map from the server's
+// additional_settings map, extracting only the known cursor fields.
+func cursorsFromAddlSettings(addl map[string]any) types.Map {
+	attrs := make(map[string]attr.Value, len(cursorFields))
 	for _, field := range cursorFields {
-		if raw, ok := props.Source.AdditionalSettings[field]; ok {
-			out[field] = string(raw)
+		if v, ok := addl[field]; ok {
+			attrs[field] = types.StringValue(fmt.Sprintf("%v", v))
+		}
+	}
+	m, _ := types.MapValue(types.StringType, attrs)
+	return m
+}
+
+// tfMapToStringMap converts a types.Map[string] to a plain Go map[string]string.
+func tfMapToStringMap(m types.Map) map[string]string {
+	out := make(map[string]string, len(m.Elements()))
+	for k, v := range m.Elements() {
+		if sv, ok := v.(types.String); ok {
+			out[k] = sv.ValueString()
 		}
 	}
 	return out

@@ -455,6 +455,29 @@ func (c *Client) UpdateDataFlow(ctx context.Context, environmentID, id string, p
 	return nil, lastErr
 }
 
+// PatchDataFlowCursors updates only the incremental cursor fields (start_date,
+// date_range) for a data flow without touching any other property.
+//
+// TODO(CORE-2448): this method is a stub — the endpoint does not exist yet.
+// Wire it up once the API ships PATCH support for cursor fields.
+// Expected contract:
+//
+//	PATCH /v1/accounts/{account}/environments/{envID}/rivers/{id}/cursors
+//	Request body: {"source": {"additional_settings": {"start_date": "...", ...}}}
+//	Success: 200 with the updated data flow body, or 204 on no-op
+func (c *Client) PatchDataFlowCursors(ctx context.Context, environmentID, id string, cursors map[string]string) (map[string]any, error) {
+	body := map[string]any{
+		"source": map[string]any{
+			"additional_settings": cursors,
+		},
+	}
+	var out map[string]any
+	if err := c.request(ctx, http.MethodPatch, c.envPath(environmentID, "/rivers/"+id+"/cursors"), body, &out); err != nil {
+		return nil, err
+	}
+	return normalizeID(out), nil
+}
+
 // isActiveFlowError returns true when the API rejected a PUT because the data
 // flow is still considered active by the backend (happens after a fast 204 disable).
 func isActiveFlowError(err error) bool {
