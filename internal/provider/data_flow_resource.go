@@ -306,15 +306,14 @@ func (r *dataFlowResource) Create(ctx context.Context, req resource.CreateReques
 		addAPIError(&resp.Diagnostics, "Error creating data flow", err)
 		return
 	}
-	// No prior state exists yet, so plan faithfully mirrors config here (no
-	// carried-forward/Unknown value to worry about the way Update has to) —
-	// safe to read scheduleConfigured straight off plan.
-	scheduleManaged := scheduleConfigured(plan)
-	resp.Diagnostics.Append(r.apply(created, envID, &plan, scheduleManaged)...)
+	resp.Diagnostics.Append(r.apply(created, envID, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(writeScheduleManaged(ctx, resp.Private, scheduleManaged)...)
+	// No prior state exists yet, so plan faithfully mirrors config here (no
+	// carried-forward/Unknown value to worry about the way Update has to) —
+	// safe to read scheduleConfigured straight off plan.
+	resp.Diagnostics.Append(writeScheduleManaged(ctx, resp.Private, scheduleConfigured(plan))...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -400,16 +399,18 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 		addAPIError(&resp.Diagnostics, "Error reading data flow", err)
 		return
 	}
-	// Read has no plan to consult, so whether config manages the schedule
-	// comes from the private-state flag the last Create/Update recorded —
-	// scheduleConfigured(state) would be wrong here, since state.SchedulersJSON
-	// may itself already hold a live-reflected (not config-declared) value
-	// from a previous unmanaged Read.
-	scheduleManaged := readScheduleManaged(ctx, req.Private, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state, scheduleManaged)...)
+	// Unconditionally reconcile schedulers_json here, the same way
+	// activate/status are reconciled below regardless of whether they're
+	// config-managed: Read's whole job is making state match reality, not
+	// preserving whatever state already said. Forcing it null right before
+	// apply() guarantees its own null-or-unknown gate treats this as needing
+	// resolution -- if config also sets schedulers_json directly, any
+	// resulting mismatch against the live value is real drift, and the next
+	// plan legitimately reasserts the configured value over it (Optional+
+	// Computed: an explicit config value always wins the plan regardless of
+	// refreshed state) -- not a bug.
+	state.SchedulersJSON = jsontypes.NewNormalizedNull()
+	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state)...)
 
 	// Refresh the activation state from the server. river_status rides along on
 	// the plain data flow GET, so observing activation costs no extra call and —
@@ -712,7 +713,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		addAPIError(&resp.Diagnostics, "Error updating data flow", err)
 		return
 	}
-	resp.Diagnostics.Append(r.apply(updated, envID, &plan, scheduleManaged)...)
+	resp.Diagnostics.Append(r.apply(updated, envID, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -1252,17 +1253,7 @@ func dataFlowScheduleBody(s *dataFlowScheduleModel) map[string]any {
 
 // apply maps an API response onto the model, normalizing read shape so an
 // imported or refreshed data flow plans clean.
-//
-// scheduleManaged tells apply whether THIS apply's config declares a
-// schedule (via the typed `schedule` block or schedulers_json) — the caller
-// determines this from config/plan for Create and Update, and from the
-// scheduleManagedPrivateKey private-state flag for Read, which has no plan
-// to consult. When true, schedulers_json is left exactly as the caller set
-// it (config wins — buildBody already sent that value, and the API's
-// response mirrors it back). When false, schedulers_json is overwritten
-// with the live API value on every call, not just once, so drift on an
-// unmanaged flow is always visible.
-func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowModel, scheduleManaged bool) diag.Diagnostics {
+func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 	m.ID = types.StringValue(asString(api["id"]))
 	m.EnvironmentID = types.StringValue(envID)
@@ -1333,26 +1324,27 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
-	// scheduleManaged=true: config declared a schedule (typed `schedule` block
-	// or schedulers_json) this apply. Leave schedulers_json exactly as the
-	// caller already set it — config wins, and since buildBody sent that same
-	// value in the PUT, the API's response mirrors it back anyway; there is
-	// nothing here to reconcile.
+	// schedulers_json is Optional+Computed. If config set it directly, it's
+	// already concrete going into apply() (config wins — buildBody sent that
+	// same value in the PUT, and the API's response mirrors it back anyway,
+	// so there's nothing to reconcile). Otherwise it's null (state) or
+	// unknown (a plan where config manages neither schedulers_json nor the
+	// typed `schedule` block) — either way it must resolve to a known value
+	// by the time this function returns, a Computed attribute's contract,
+	// so reflect the live scheduler into it unconditionally whenever that's
+	// true. This runs on every call, not gated by whether it was already
+	// null, so a schedule changed out of band (console, another tool) keeps
+	// showing up on every refresh, not just the first one.
 	//
-	// scheduleManaged=false: config declares neither. Reflect the live
-	// scheduler into schedulers_json unconditionally, on every call — not
-	// gated by whether it was already null — so a schedule changed out of
-	// band (console, another tool) keeps showing up on every refresh, not
-	// just the first one. The typed `schedule` block is NOT populated here:
-	// it's a raw *dataFlowScheduleModel, not an attr.Value-based type, and
-	// decoding an Unknown value into it hard-errors (confirmed empirically)
-	// — fixing that needs dataFlowScheduleModel migrated to types.Object
-	// first.
+	// The typed `schedule` block is NOT populated here: it's a raw
+	// *dataFlowScheduleModel, not an attr.Value-based type, and decoding an
+	// Unknown value into it hard-errors (confirmed empirically) — fixing
+	// that needs dataFlowScheduleModel migrated to types.Object first.
 	//
 	// This never fights ensureSchedulersInBody's live scheduler preservation
 	// during a disable/re-enable-CDC round trip: that's about what's sent to
 	// the API, this is purely about what Terraform reports afterward.
-	if !scheduleManaged {
+	if m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown() {
 		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
 			if raw, err := json.Marshal(schedulers); err == nil {
 				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))

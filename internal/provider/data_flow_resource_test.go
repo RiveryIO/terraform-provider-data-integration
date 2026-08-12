@@ -1490,12 +1490,24 @@ func TestScheduleConfigured(t *testing.T) {
 	}
 }
 
-// TestDataFlowApplyScheduleReconciliation proves apply()'s two schedule
-// behaviors directly: scheduleManaged=true leaves schedulers_json exactly as
-// the caller set it (config wins, no live sync), and scheduleManaged=false
-// reflects the live API value unconditionally -- a real schedule when one
-// exists, and null when the API reports none (not left stale from a prior
-// value).
+// TestDataFlowApplyScheduleReconciliation proves apply()'s schedulers_json
+// behavior directly, gated purely on the field's OWN null/unknown state
+// going in -- not any external "is this managed" flag. A concrete value
+// (config set it directly) is left untouched. A null or unknown value (config
+// manages neither schedulers_json nor the typed `schedule` block -- Unknown
+// is the real case on every Create/Update plan for an unmanaged Optional+
+// Computed attribute with no plan modifier, not just null) must resolve to
+// a known value by the time apply() returns, so it reflects the live API
+// value -- a real schedule when one exists, and null when the API reports
+// none (not left stale from a prior value).
+//
+// A version of this test that gated on a separate "scheduleManaged" flag
+// (derived from whether config set the typed `schedule` block OR
+// schedulers_json) shipped an apply()-time bug: it left schedulers_json
+// Unknown whenever `schedule` was configured, and Terraform rejected the
+// result with "Provider returned invalid result object after apply" the
+// first time this ran against a real live CDC flow -- reproduced from a
+// real `terraform apply`, not just inferred.
 func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
 	r := &dataFlowResource{}
 	apiWithSchedule := map[string]any{
@@ -1506,11 +1518,11 @@ func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
 		"id": "river1", "name": "flow", "kind": "main_river", "type": "source_to_target",
 	}
 
-	t.Run("managed: config value is left untouched", func(t *testing.T) {
+	t.Run("concrete: config value is left untouched", func(t *testing.T) {
 		m := baseDataFlowModel()
 		configValue := `[{"cron_expression":"0 0 * * *","is_enabled":true}]`
 		m.SchedulersJSON = jsontypes.NewNormalizedValue(configValue)
-		if diags := r.apply(apiWithSchedule, "env1", &m, true); diags.HasError() {
+		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
 			t.Fatalf("unexpected diagnostics: %v", diags)
 		}
 		if m.SchedulersJSON.ValueString() != configValue {
@@ -1519,9 +1531,24 @@ func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
 		}
 	})
 
-	t.Run("unmanaged: reflects a real live schedule", func(t *testing.T) {
+	t.Run("unknown (the real Create/Update case for an unmanaged attribute): resolves to the live schedule", func(t *testing.T) {
 		m := baseDataFlowModel()
-		if diags := r.apply(apiWithSchedule, "env1", &m, false); diags.HasError() {
+		m.SchedulersJSON = jsontypes.NewNormalizedUnknown()
+		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", diags)
+		}
+		want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
+		if m.SchedulersJSON.IsUnknown() {
+			t.Fatal("schedulers_json is still unknown -- this is exactly the bug that made a real apply fail")
+		}
+		if m.SchedulersJSON.IsNull() || m.SchedulersJSON.ValueString() != want {
+			t.Errorf("schedulers_json = %v, want %s", m.SchedulersJSON, want)
+		}
+	})
+
+	t.Run("null: reflects a real live schedule", func(t *testing.T) {
+		m := baseDataFlowModel()
+		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
 			t.Fatalf("unexpected diagnostics: %v", diags)
 		}
 		want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
@@ -1530,10 +1557,9 @@ func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
 		}
 	})
 
-	t.Run("unmanaged: reflects no live schedule as null, not stale", func(t *testing.T) {
+	t.Run("null: reflects no live schedule as null, not stale", func(t *testing.T) {
 		m := baseDataFlowModel()
-		m.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"cron_expression":"0 * * * *","is_enabled":true}]`)
-		if diags := r.apply(apiWithoutSchedule, "env1", &m, false); diags.HasError() {
+		if diags := r.apply(apiWithoutSchedule, "env1", &m); diags.HasError() {
 			t.Fatalf("unexpected diagnostics: %v", diags)
 		}
 		if !m.SchedulersJSON.IsNull() {
