@@ -18,8 +18,13 @@ adds or changes connectors — no provider release required to pick up a new fie
 
 - `property_names` — the plain list of keys valid inside that connection type's `parameters_json`.
   Use this when you just need to know what to fill in.
-- `properties_json` — the full raw property schema (types, which fields are required, which are
+- `property_schema_json` — the full raw property schema (types, which fields are required, which are
   file uploads), for building your own tooling on top of it.
+
+-> This attribute used to be called `properties_json`. That name is deprecated but still works: it
+returns the identical value. It was renamed because a data flow's `properties_json` is the opposite
+kind of thing — a payload you author and the API consumes — while this one is read-only schema
+metadata the API hands back, and one shared name made the two read as interchangeable.
 
 See [`boomi_data_integration_connection_types`](./data_integration_connection_types) to browse every
 available connection type first.

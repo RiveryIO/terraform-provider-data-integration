@@ -2,7 +2,7 @@
 page_title: "Look up a connection type's properties (boomi_data_integration_connection_type)"
 subcategory: "Connections"
 description: |-
-  The property schema of a single connection type, read from the live Data Integration API. Use it to discover which fields belong in a boomi_connection's parameters_json for a given type — the field set stays current as the API evolves, with no provider release required. properties_json carries the full, raw property schema (each type's shape differs), and property_names extracts the field ids for convenience.
+  The property schema of a single connection type, read from the live Data Integration API. Use it to discover which fields belong in a boomi_connection's parameters_json for a given type — the field set stays current as the API evolves, with no provider release required. property_schema_json carries the full, raw property schema (each type's shape differs), and property_names extracts the field ids for convenience.
 ---
 
 # Look up a connection type's properties
@@ -18,8 +18,13 @@ adds or changes connectors — no provider release required to pick up a new fie
 
 - `property_names` — the plain list of keys valid inside that connection type's `parameters_json`.
   Use this when you just need to know what to fill in.
-- `properties_json` — the full raw property schema (types, which fields are required, which are
+- `property_schema_json` — the full raw property schema (types, which fields are required, which are
   file uploads), for building your own tooling on top of it.
+
+-> This attribute used to be called `properties_json`. That name is deprecated but still works: it
+returns the identical value. It was renamed because a data flow's `properties_json` is the opposite
+kind of thing — a payload you author and the API consumes — while this one is read-only schema
+metadata the API hands back, and one shared name made the two read as interchangeable.
 
 See [`boomi_data_integration_connection_types`](./data_integration_connection_types) to browse every
 available connection type first.
@@ -41,8 +46,9 @@ output "snowflake_field_ids" {
 }
 
 # The full raw property schema (types, required flags, file-upload fields).
+# Formerly `properties_json`, which still works but is deprecated.
 output "snowflake_schema_json" {
-  value = data.boomi_data_integration_connection_type.snowflake.properties_json
+  value = data.boomi_data_integration_connection_type.snowflake.property_schema_json
 }
 ```
 
@@ -57,8 +63,9 @@ output "snowflake_schema_json" {
 
 - `connection_type_name` (String) Human-readable name (e.g. "MySQL").
 - `id` (String) Equals connection_type.
-- `properties_json` (String) The full property schema as raw JSON (a list of property objects, each with id/type and optional display_name/ui_type/default_value/etc.). Kept opaque because each connection type's property shape differs.
+- `properties_json` (String, Deprecated) Deprecated alias of `property_schema_json`, carrying the identical value. Renamed because a data flow's `properties_json` is a payload you write while this attribute is schema metadata the API returns; sharing one name made the two read as the same thing.
 - `property_names` (List of String) The ids of the type's configurable properties — the keys valid in a boomi_connection parameters_json for this type.
+- `property_schema_json` (String) The full property schema as raw JSON (a list of property objects, each with id/type and optional display_name/ui_type/default_value/etc.). Kept opaque because each connection type's property shape differs. Read-only metadata describing which fields a connection accepts — not a payload: it is the inverse direction of a data flow's properties_json, which you author and the API consumes.
 
 ## Related
 

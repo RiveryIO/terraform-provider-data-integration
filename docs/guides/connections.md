@@ -43,10 +43,58 @@ output "snowflake_properties" {
 
 `property_names` is the list of keys valid inside that connection's
 `parameters_json` — exactly the keys the live API will accept, no more, no
-less. `properties_json` (singular object, not to be confused with the
-connection resource's `parameters_json`) carries the full property schema —
-types, whether a field is required, whether it's a file upload — as raw JSON,
-for building your own tooling on top of it.
+less. `property_schema_json` carries the full property schema — types, whether
+a field is required, whether it's a file upload — as raw JSON, for building
+your own tooling on top of it.
+
+-> `property_schema_json` was previously named `properties_json`. The old name
+still works and returns the same value, but it is deprecated. Both it and a data
+flow's `properties_json` shared a name while meaning opposite things: the data
+flow attribute is a payload you author and the API consumes, whereas this one is
+read-only schema metadata the API returns.
+
+## The shape of `parameters_json`: flat, and merged at the top level
+
+`parameters_json` is a **flat** object. Every key in it becomes a top-level
+field of the connection request body, next to `name` and `type` — the provider
+copies them across one level, it does not unwrap anything:
+
+```hcl
+# CORRECT — property ids at the top level
+parameters_json = jsonencode({
+  host     = "db.internal.example.com"
+  port     = 3306
+  database = "sales"
+  username = "svc_user"
+  password = "..."
+})
+```
+
+```hcl
+# WRONG — a wrapper object. Applies cleanly and produces a broken connection.
+parameters_json = jsonencode({
+  connection_configuration = {
+    host     = "db.internal.example.com"
+    password = "..."
+  }
+})
+```
+
+!> **A wrapper object fails silently, exactly like a misspelled key.** The
+wrapper is forwarded as one unrecognised top-level field, the API ignores it and
+returns `201`, and you are left with a connection that has no host and no
+credential — no error, no warning. Confirmed live on 2026-08-13. There is
+nothing to notice afterwards either: secrets are never returned on read (see
+below), so a connection with no credential looks the same as a working one.
+
+Three more rules the provider applies when merging:
+
+- Keys must be the property ids from `GET /v1/connections_types/{type}` — use
+  the `connection_type` data source above rather than guessing.
+- `name`, `type` and `ssh_pkey_file_path` are reserved. Setting them here has no
+  effect; use the `name`/`type` arguments and `file_params` instead.
+- If the same key is set both here and by a `file_params` upload, the uploaded
+  file's server-side path wins.
 
 ## Finding the right properties for a target
 
@@ -175,12 +223,25 @@ Databases that aren't publicly routable — or that only allow a bastion host �
 are reached through an SSH tunnel. This is configured entirely inside
 `parameters_json`, plus the private key as a file upload.
 
-!> **The tunnel fields are not listed by
-`GET /v1/connections_types/{type}`, and therefore not by the
-`boomi_data_integration_connection_type` data source either.** Everywhere else
-in this guide that catalog is authoritative for what `parameters_json` accepts.
-For the SSH-tunnel path it is not — the fields below are real and accepted, but
-you cannot discover them from it. This section is the reference.
+!> **The tunnel fields are missing from `GET /v1/connections_types/{type}`, and
+therefore from the `boomi_data_integration_connection_type` data source — but
+they ARE in the catalog listing.** `GET /v1/connections_types` returns
+`is_ssh_tunnel`, `ssh_remote_host`, `ssh_remote_user`, `ssh_remote_port`,
+`ssh_remote_password`, `ssh_pkey_file_path`, `ssh_pkey_file_pwd` and
+`ssh_auto_generate` for `mysql`. So there is no catalog gap here and no
+exception to the rule that the API is authoritative — just two endpoints, one of
+which under-reports.
+
+-> **The per-type endpoint is a strict subset of the listing, for every type
+checked.** Measured live on 2026-08-13: `mysql` returns 10 properties per type
+against 18 in the listing, `mssql` 13 against 22, `snowflake` 10 against 23,
+`postgres` 12 against 28, `jira` 7 against 12. Nothing appeared in a per-type
+response that was absent from the listing. Beyond the tunnel fields, the
+per-type response also omits the file-zone staging fields (`default_bucket`,
+`region`, `aws_access_key`, `aws_access_secret`, `custom_fz`,
+`fz_connection_id`) and `connection_name`. Prefer
+`boomi_data_integration_connection_types` (plural) when you need a complete
+field list; the singular data source still reads the per-type endpoint.
 
 ```hcl
 resource "boomi_data_integration_connection" "mysql_tunneled" {
