@@ -82,7 +82,14 @@ func (r *dataFrameResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"connection_settings": schema.SingleNestedAttribute{
 				Optional: true,
-				Computed: true,
+				// Not Computed: when absent from config the plan value is null, not
+				// (unknown). Computed:true on a SingleNestedAttribute whose model field
+				// is a plain Go struct pointer (*dataFrameConnSettings) causes the
+				// framework to emit (unknown) in the plan, which the pointer type cannot
+				// hold — crashing with "Received unknown value, however the target type
+				// cannot handle unknown values." The correct fix is null (Optional only),
+				// not (unknown). Sub-fields stay Optional+Computed: they use types.String
+				// which can hold unknowns, allowing the API to fill in e.g. datasource_id.
 				Description: "Storage connection for a file-zone (custom) dataframe. " +
 					"Omit this block to create an internal (data-flow-managed) dataframe whose storage and " +
 					"credentials the platform manages automatically. " +
