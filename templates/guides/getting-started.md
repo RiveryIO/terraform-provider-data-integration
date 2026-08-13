@@ -121,14 +121,14 @@ to each one with a `postcondition`, and a bad host, credential, or network
 path fails the apply immediately:
 
 ```hcl
-data "boomi_data_integration_connection_test" "snowflake" {
-  connection_id = boomi_data_integration_connection.snowflake.id
-  datasource_id = "snowflake"
+data "boomi_data_integration_connection_test" "jira" {
+  connection_id = boomi_data_integration_connection.jira.id
+  datasource_id = "jira"
 
   lifecycle {
     postcondition {
       condition     = self.success
-      error_message = "Snowflake connection failed: ${self.error_message}"
+      error_message = "Jira connection failed: ${self.error_message}"
     }
   }
 }
@@ -141,6 +141,22 @@ seconds. Read the
 [data source's page](../data-sources/data_integration_connection_test.md)
 before adding it to an existing connection, though — it runs at plan time
 there, which has its own consequences.
+
+~> **This example works because Jira is a source connection.**
+`connection_test` defaults to `task_type = "source"` with
+`task = "get_db_metadata"`. Point that same default at a data-warehouse
+connection used as a data flow **target** (Snowflake, BigQuery, Databricks)
+and the API rejects it with a hard `400 "The connection does not match to the
+provided connection_type"` — a provider error, not `success = false`, so the
+postcondition above never even runs. For a warehouse target, use one of two
+approaches instead (both verified working): set `task_type = "target"` with
+the warehouse's own listing verb (e.g. `task = "get_databases"` for
+Snowflake), or use
+[`boomi_data_integration_target_metadata`](../data-sources/data_integration_target_metadata.md),
+which issues the correct request and also returns the warehouse's database
+list. See the
+[connection_test data source's page](../data-sources/data_integration_connection_test.md)
+for the full detail.
 
 ---
 

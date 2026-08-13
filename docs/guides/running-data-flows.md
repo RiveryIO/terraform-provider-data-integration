@@ -59,11 +59,28 @@ All paths below are prefixed with
 | --- | --- |
 | Trigger a run | `POST /rivers/{river_cross_id}/run` → **202** |
 | Poll one run | `GET /rivers/{river_cross_id}/runs/{run_id}` |
+| List a flow's runs | `GET /rivers/{river_cross_id}/runs?start_time=…&end_time=…` |
 | Fetch run logs | `GET /rivers/{river_cross_id}/runs/{run_id}/logs` |
 | Cancel | `POST /rivers/{river_cross_id}/cancel_run` |
 
 `river_cross_id` is the `id` attribute of `boomi_data_integration_data_flow` —
 output it from Terraform and hand it to your pipeline.
+
+~> **`start_time` and `end_time` are mandatory on the list endpoint.** They are
+query parameters, not optional filters, and both are RFC3339. Calling it bare
+returns `422`, naming them as missing fields rather than as required arguments:
+>
+> `{"detail":[{"type":"missing","loc":["query","start_time"],"msg":"Field required"},`
+> `{"type":"missing","loc":["query","end_time"],"msg":"Field required"}]}`
+
+```
+GET /v1/accounts/{account}/environments/{env}/rivers/{river_cross_id}/runs
+    ?start_time=2026-08-12T11:30:00Z&end_time=2026-08-12T14:40:00Z
+```
+
+Reach for this when you hold a `river_cross_id` but not a `run_id` — recovering
+the run a pipeline triggered but whose id was lost, or auditing what a flow has
+done inside a window. To follow a run you just triggered, poll it by id instead.
 
 The trigger returns a **run group**, because one flow can produce several runs
 (sub-flows). For a single-flow run, the run you want is the first entry:

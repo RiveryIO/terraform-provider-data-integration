@@ -312,8 +312,3 @@ resource "boomi_data_integration_connection" "mysql_source" {
   })
 }
 ```
-
--> **Known gap:** `examples/connection-s3` in this repo creates an `aws_fz`
-connection but doesn't demonstrate linking another connection to it via
-`fz_connection_id` — worth fixing in a follow-up examples PR, not addressed
-here.

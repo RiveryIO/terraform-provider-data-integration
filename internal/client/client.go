@@ -70,6 +70,14 @@ var (
 	ErrForbidden    = fmt.Errorf("insufficient permissions (403): %w", ErrAuth)
 	ErrNotFound     = errors.New("resource not found (404)")
 	ErrValidation   = errors.New("validation failed (400/422)")
+
+	// ErrConnectionTestTimeout marks a TestConnection poll that never reached a
+	// terminal status before its deadline. It is deliberately distinct from a
+	// transport/auth/validation failure: the pull-request operation is still
+	// genuinely in flight (rivery_back just hasn't scheduled/finished it yet),
+	// so the caller has a real, partially-populated ConnectionTestResult and can
+	// choose to treat "still running" as inconclusive rather than fatal.
+	ErrConnectionTestTimeout = errors.New("connection test timed out")
 )
 
 func (e *APIError) Unwrap() error {
@@ -839,7 +847,13 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 type DataFlowVariableSettings struct {
 	ClearValueOnStart bool `json:"clear_value_on_start"`
 	IsMultiValue      bool `json:"is_multi_value"`
-	IsEncrypted       bool `json:"is_encrypted"`
+	// The API's field for this is `is_private`, not `is_encrypted`. It silently
+	// drops unknown keys inside `settings`, so tagging this `is_encrypted` made
+	// the flag a no-op AND drove a perpetual `false -> true` plan diff, because
+	// the read always came back false. Verified live 2026-08-12: PUT with
+	// is_encrypted echoes {"is_private": false}; PUT with is_private echoes
+	// {"is_private": true}. The Terraform attribute stays `is_encrypted`.
+	IsEncrypted bool `json:"is_private"`
 }
 
 // DataFlowVariable is a single item in the data flow variables collection.
@@ -964,7 +978,7 @@ func (c *Client) TestConnection(ctx context.Context, environmentID string, body 
 	deadline := time.Now().Add(timeout)
 	for res.Status == "W" || res.Status == "R" || res.Status == "" {
 		if time.Now().After(deadline) {
-			return res, fmt.Errorf("connection test timed out after %s (operation %s still %q)", timeout, res.OperationID, res.Status)
+			return res, fmt.Errorf("%w after %s (operation %s still %q)", ErrConnectionTestTimeout, timeout, res.OperationID, res.Status)
 		}
 		select {
 		case <-ctx.Done():

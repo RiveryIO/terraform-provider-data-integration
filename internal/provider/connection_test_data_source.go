@@ -3,12 +3,16 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/boomi/terraform-provider-data-integration/internal/client"
 )
 
 var (
@@ -69,10 +73,19 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 			"This test is a live network call and it competes for platform workers. A test that " +
 			"completes in ~35s on its own can sit at operation status \"R\" past the 180s default when " +
 			"Terraform reads it concurrently with other live data sources, which it does by default. A " +
-			"timeout here is a hard provider error, not `success = false`, so a postcondition cannot " +
-			"catch it — raise `timeout_seconds`, run with `-parallelism=1`, or prefer " +
-			"`boomi_data_integration_source_metadata`, which proves the same connection AND returns the " +
-			"schema mapping the data flow needs, replacing this test rather than adding to it.",
+			"timeout here now surfaces as `success = false` (status stays \"R\", `error_message` carries " +
+			"the timeout detail) plus a warning diagnostic — not a hard provider error — so a " +
+			"postcondition on `self.success` DOES catch it. Mitigations, best first: keep " +
+			"`timeout_seconds` SMALL so an inconclusive gate fails fast; stage the apply so gates do " +
+			"not front-run the work (apply the connections, then the data flow, then let the gates " +
+			"read); and only then consider `-parallelism=1`. Do NOT combine a raised " +
+			"`timeout_seconds` with `-parallelism=1`: serialising the reads makes their timeouts SUM, " +
+			"and they sum in front of resource creation — two gates at 600s and 5m become a " +
+			"15-minute prologue ahead of a data flow that takes ~60s to create. " +
+			"`boomi_data_integration_source_metadata` is an alternative that proves the same " +
+			"connection AND returns the schema mapping the data flow needs, replacing this test " +
+			"rather than adding to it — but note it issues one live request per requested table, " +
+			"serially, so for a multi-table flow it is not cheaper.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -112,8 +125,10 @@ func (d *connectionTestDataSource) Schema(_ context.Context, _ datasource.Schema
 					"connection_id and pull_request_type are always set by the provider.",
 			},
 			"timeout_seconds": schema.Int64Attribute{
-				Optional:    true,
-				Description: "How long to wait for the test to finish before erroring. Default 180.",
+				Optional: true,
+				Description: "How long to wait for the test to finish before giving up. Default 180. On " +
+					"expiry the read does NOT error: it returns `success = false` (status stays \"R\") " +
+					"plus a warning diagnostic, so a `postcondition` on `self.success` still catches it.",
 			},
 			"operation_id": schema.StringAttribute{
 				Computed:    true,
@@ -208,9 +223,57 @@ func (d *connectionTestDataSource) Read(ctx context.Context, req datasource.Read
 	}
 
 	result, err := d.data.client.TestConnection(ctx, envID, body, 4*time.Second, timeout)
-	if err != nil {
+
+	// A timeout is NOT treated like other errors here. TestConnection still
+	// returns the partially-populated result (OperationID, RunID, and the
+	// last-seen Status — typically "R") even when it also returns an error, so
+	// there is a real, if inconclusive, result to report. Falling through to
+	// the normal state-set below means Status != "D" makes Success false on
+	// its own, which is exactly what lets the `postcondition { condition =
+	// self.success }` pattern this data source's docs recommend actually run
+	// — a hard error here would skip the postcondition entirely, which is the
+	// bug this branch exists to avoid. A warning is still raised so a caller
+	// who did NOT write a postcondition sees that the test was inconclusive,
+	// rather than silently reading `success = false` as if the connection
+	// itself failed.
+	timedOut := errors.Is(err, client.ErrConnectionTestTimeout)
+	if err != nil && !timedOut {
+		// The most common non-timeout failure is a warehouse connection
+		// (Snowflake/BigQuery/Databricks) tested with the source-shaped
+		// defaults: task_type defaults to "source", but a warehouse only
+		// accepts a "target" pull request, so the API returns a 400 with this
+		// exact detail text. targetTasks (defined in
+		// target_metadata_data_source.go) tells us both that datasource_id is
+		// a warehouse and which task verb it actually accepts, so we can name
+		// the fix instead of surfacing a bare 400.
+		if targetTask, isWarehouse := targetTasks[datasourceID]; isWarehouse &&
+			strings.Contains(err.Error(), "does not match to the provided connection_type") {
+			resp.Diagnostics.AddError(
+				"Wrong task_type for a warehouse connection",
+				fmt.Sprintf(
+					"%q is a data-warehouse connector. `task_type` defaults to \"source\", but this "+
+						"connection was tested as a source and the API rejected it because a warehouse "+
+						"only accepts a \"target\" pull request.\n\n"+
+						"Fix: set `task_type = \"target\"` and `task = %q` on this data source, or use "+
+						"`boomi_data_integration_target_metadata` instead — it always issues the correct "+
+						"`task_type = \"target\"` request and also returns the warehouse's container list "+
+						"(databases/datasets/catalogs).\n\nAPI error: %s",
+					datasourceID, targetTask, err),
+			)
+			return
+		}
 		addAPIError(&resp.Diagnostics, "Error running connection test", err)
 		return
+	}
+	if timedOut {
+		resp.Diagnostics.AddWarning(
+			"Connection test did not finish in time",
+			fmt.Sprintf("%s\n\nThe test is reported as unsuccessful (`success = false`) because the "+
+				"result is inconclusive, not because the connection was confirmed broken. The operation "+
+				"may still be running on the platform. Re-run to check the outcome, raise "+
+				"`timeout_seconds`, or see the data source's documentation for reducing worker "+
+				"contention.", err),
+		)
 	}
 
 	state := config
@@ -222,7 +285,14 @@ func (d *connectionTestDataSource) Read(ctx context.Context, req datasource.Read
 	state.RunID = types.StringValue(result.RunID)
 	state.Status = types.StringValue(result.Status)
 	state.Success = types.BoolValue(result.Status == "D")
-	state.ErrorMessage = types.StringValue(result.ErrorMessage)
+	if timedOut {
+		// result.ErrorMessage is empty on timeout (the operation never reached
+		// a terminal state to report a connector error) — surface the timeout
+		// detail itself so a postcondition has something actionable to print.
+		state.ErrorMessage = types.StringValue(err.Error())
+	} else {
+		state.ErrorMessage = types.StringValue(result.ErrorMessage)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

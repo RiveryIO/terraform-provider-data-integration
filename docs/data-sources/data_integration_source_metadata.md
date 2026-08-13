@@ -2,7 +2,7 @@
 page_title: "Discover a source's schema (boomi_data_integration_source_metadata)"
 subcategory: "Metadata & schema"
 description: |-
-  Discovers the schema and columns of an RDBMS source connection, so a source-to-target data flow's table/column mapping is discovered from the live source rather than hand-written. It drives the same get_db_metadata "pull request" the console's mapping tab uses: the platform opens a connection to the source, introspects the requested schema (and, when given, specific tables), and returns the columns. The primary output schemas_json is a ready-to-use properties.schemas[] block — decode it with jsondecode() into a data flow's properties_json. schemas exposes the same discovery as typed nested objects for inspection. RDBMS sources only (mysql, postgres, sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported.
+  Discovers the schema and columns of an RDBMS source connection, so a source-to-target data flow's table/column mapping is discovered from the live source rather than hand-written. It drives the same get_db_metadata "pull request" the console's mapping tab uses: the platform opens a connection to the source, introspects the requested schema (and, when given, specific tables), and returns the columns. The primary output schemas_json is a ready-to-use properties.schemas[] block — decode it with jsondecode() into a data flow's properties_json. schemas exposes the same discovery as typed nested objects for inspection. RDBMS sources only (mysql, postgres, sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported. Cost note: discovery costs one live platform request per requested table, issued serially — this is cheaper than a separate connection_test only when discovering a single table or the whole schema at once; requesting many individual tables means many sequential round trips against the same worker pool, each bounded by timeouts.read.
 ---
 
 # Discover a source's schema
@@ -131,7 +131,7 @@ Optional:
 
 Optional:
 
-- `read` (String) Go duration string (e.g. "3m", "90s") bounding the discovery poll. Default "3m".
+- `read` (String) Go duration string (e.g. "3m", "90s") bounding the discovery poll. Default "3m". Discovery issues one live pull request per requested table, serially, and this bound applies PER TABLE rather than as a total budget for the whole read: with N tables in the tables attribute, the worst case is N times this value (e.g. ten tables at the 3m default is up to 30m), even though a single-table or whole-schema request normally finishes well inside one timeout window.
 
 
 <a id="nestedatt--schemas"></a>
