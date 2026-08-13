@@ -99,6 +99,30 @@ misspelled field name does not error. It applies cleanly, reports success, and
 leaves you with a connection that has no credential. You will discover it much
 later, as an opaque timeout on the flow's first run.
 
+**Verified live, 2026-08-13** — do not re-derive this. A `mysql` connection was
+created through the API carrying a deliberately misspelled `passwordd` alongside
+valid fields. The call returned `201`, with no error and no warning naming the
+bad key, and the misspelled field was absent from both the create and the read
+body. Evidence covers one connector; the behaviour is asserted generally.
+
+!> **The same tolerance applies to the whole body, not just individual keys.**
+Nesting the connection fields one level deeper than the API expects — e.g.
+wrapping them in a `connection_configuration` object instead of placing them at
+the top level — is *also* accepted without error. It creates a connection shell
+with no host and no credential flags at all. The fields belong flat at the top
+level of the request body. Measured the same day, while getting the probe above
+to work.
+
+-> **And this is why the misspelling stays hidden.** A connection read never
+returns a secret *value* — it reports presence as `<field>_exists` booleans plus
+`is_<field>_encrypted` flags. The same `mysql` probe confirmed it with sentinel
+values in `password` and `ssh_remote_password`: neither came back, only the
+presence and encryption flags, while non-secret fields (`host`, `port`,
+`database`, `username`) did come back in clear. So a dropped credential and a
+stored credential look identical from the outside, and no amount of reading the
+connection back will tell them apart. Check the field names against the catalog
+*before* you apply; there is no after-the-fact detection.
+
 From inside Terraform, the same check is available without leaving your
 configuration:
 

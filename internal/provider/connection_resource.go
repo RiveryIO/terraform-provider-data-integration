@@ -24,8 +24,41 @@ var (
 	_ resource.ResourceWithImportState = (*connectionResource)(nil)
 )
 
-// secretAPIFields are field names that contain actual secret values returned by
-// the API. Strip these from connection_info so state never holds credentials.
+// secretAPIFields are field names that would contain actual secret values if the
+// API ever returned them. Stripped from connection_info so state never holds
+// credentials.
+//
+// DEFENCE IN DEPTH, NOT THE PRIMARY PROTECTION — measured live against the
+// integration environment on 2026-08-13, so nobody has to re-derive it:
+//
+//   - A connection GET never returns a secret VALUE. It reports presence
+//     instead, as booleans with an `_exists` suffix (password_exists,
+//     api_token_exists, client_secret_exists, credentials_exists,
+//     ssh_remote_password_exists, ssh_pkey_file_pwd_exists) alongside
+//     is_<field>_encrypted flags.
+//   - Established by creating a throwaway mysql connection carrying sentinel
+//     values in two fields: `password` (listed below) and `ssh_remote_password`
+//     (deliberately NOT listed below). Neither sentinel appeared anywhere in
+//     the create or the read body — only password_exists /
+//     is_password_encrypted and ssh_remote_password_exists /
+//     is_ssh_remote_password_encrypted. Corroborated by reading two
+//     pre-existing connections of different types, which show the same shape.
+//     Non-secret fields (host, port, database, username) DO come back in clear.
+//   - So the names below do not occur as keys on the read path at all. What
+//     does occur are the `_exists` booleans, which are safe to keep. This map
+//     is a guard against a response shape the API does not currently produce —
+//     and note the sentinel test shows an unlisted secret field is equally
+//     safe, which is why the drift below has no impact.
+//   - The list is also incomplete by design-drift, which is harmless for the
+//     reason above but worth knowing before anyone "fixes" it: the type catalog
+//     marks 50 distinct property ids as "type":"password" across its 365
+//     connection types, and the 13 names below cover 10 of them. Deriving the
+//     set from the catalog is possible (that marker is reliable; the ui_type
+//     field is NOT — it is absent from the per-type endpoint) but buys nothing
+//     while secrets are never echoed.
+//
+// Re-check with: GET /v1/accounts/{acct}/environments/{env}/connections/{id}
+// and confirm every credential-bearing field still arrives as <field>_exists.
 var secretAPIFields = map[string]bool{
 	"password": true, "account_key": true, "access_token": true,
 	"personal_access_token": true, "aws_access_secret": true,
@@ -97,7 +130,14 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				CustomType: jsontypes.NormalizedType{},
 				Description: "Connection-type-specific parameters as a JSON object, including " +
 					"credentials. Write-only: never stored in state. The API omits secrets on " +
-					"read, so drift detection for credentials is not possible.",
+					"read, so drift detection for credentials is not possible. Must be a FLAT " +
+					"object: every key becomes a top-level field of the connection request body, " +
+					"alongside name and type. Nested objects are passed through as-is and are not " +
+					"unwrapped — the API then ignores the whole wrapper and creates a connection " +
+					"with no host and no credentials, without reporting an error. Keys must be the " +
+					"property ids from GET /v1/connections_types/{type}; name, type and " +
+					"ssh_pkey_file_path are reserved and dropped here, and a key already set by a " +
+					"file_params upload wins over the same key set here.",
 			},
 			"fz_connection_id": schema.StringAttribute{
 				Optional:    true,

@@ -53,6 +53,49 @@ flow's `properties_json` shared a name while meaning opposite things: the data
 flow attribute is a payload you author and the API consumes, whereas this one is
 read-only schema metadata the API returns.
 
+## The shape of `parameters_json`: flat, and merged at the top level
+
+`parameters_json` is a **flat** object. Every key in it becomes a top-level
+field of the connection request body, next to `name` and `type` — the provider
+copies them across one level, it does not unwrap anything:
+
+```hcl
+# CORRECT — property ids at the top level
+parameters_json = jsonencode({
+  host     = "db.internal.example.com"
+  port     = 3306
+  database = "sales"
+  username = "svc_user"
+  password = "..."
+})
+```
+
+```hcl
+# WRONG — a wrapper object. Applies cleanly and produces a broken connection.
+parameters_json = jsonencode({
+  connection_configuration = {
+    host     = "db.internal.example.com"
+    password = "..."
+  }
+})
+```
+
+!> **A wrapper object fails silently, exactly like a misspelled key.** The
+wrapper is forwarded as one unrecognised top-level field, the API ignores it and
+returns `201`, and you are left with a connection that has no host and no
+credential — no error, no warning. Confirmed live on 2026-08-13. There is
+nothing to notice afterwards either: secrets are never returned on read (see
+below), so a connection with no credential looks the same as a working one.
+
+Three more rules the provider applies when merging:
+
+- Keys must be the property ids from `GET /v1/connections_types/{type}` — use
+  the `connection_type` data source above rather than guessing.
+- `name`, `type` and `ssh_pkey_file_path` are reserved. Setting them here has no
+  effect; use the `name`/`type` arguments and `file_params` instead.
+- If the same key is set both here and by a `file_params` upload, the uploaded
+  file's server-side path wins.
+
 ## Finding the right properties for a target
 
 Targets aren't connections — a target's shape depends on the **combination**
