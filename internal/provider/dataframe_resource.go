@@ -5,12 +5,15 @@ import (
 	"errors"
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 var (
@@ -19,6 +22,16 @@ var (
 	_ resource.ResourceWithImportState = (*dataFrameResource)(nil)
 )
 
+// dataFrameConnSettingsAttrTypes is the canonical attribute-type map for the
+// connection_settings nested object. Used by types.ObjectValueFrom and
+// types.ObjectNull so the framework knows the object's schema at runtime.
+var dataFrameConnSettingsAttrTypes = map[string]attr.Type{
+	"connection":     types.StringType,
+	"datasource_id":  types.StringType,
+	"storage_type":   types.StringType,
+	"default_bucket": types.StringType,
+}
+
 // NewDataFrameResource is the factory registered with the provider.
 func NewDataFrameResource() resource.Resource { return &dataFrameResource{} }
 
@@ -26,13 +39,32 @@ type dataFrameResource struct {
 	data *providerData
 }
 
+// dataFrameModel is the Terraform state / plan model.
+//
+// ConnectionSettings uses types.Object rather than *dataFrameConnSettings
+// because connection_settings is Optional+Computed in the schema. When the
+// block is absent from config the Plugin Framework emits (unknown) in the plan
+// (not null) — signalling "the provider may fill this in". A plain Go pointer
+// can only represent nil (null) or a concrete value; it panics on
+// req.Plan.Get() when the framework tries to decode (unknown) into it:
+//
+//	Error: Value Conversion Error
+//	  Path: connection_settings
+//	  Target Type: *provider.dataFrameConnSettings
+//	  Suggested Type: basetypes.ObjectValue
+//	  Received unknown value, however the target type cannot handle unknown values.
+//
+// types.Object holds null / unknown / value without panicking. Use
+// .IsNull(), .IsUnknown(), and .As() to read it.
 type dataFrameModel struct {
-	ID                 types.String           `tfsdk:"id"`
-	EnvironmentID      types.String           `tfsdk:"environment_id"`
-	Name               types.String           `tfsdk:"name"`
-	ConnectionSettings *dataFrameConnSettings `tfsdk:"connection_settings"`
+	ID                 types.String `tfsdk:"id"`
+	EnvironmentID      types.String `tfsdk:"environment_id"`
+	Name               types.String `tfsdk:"name"`
+	ConnectionSettings types.Object `tfsdk:"connection_settings"`
 }
 
+// dataFrameConnSettings is used only for As() decoding and ObjectValueFrom
+// encoding — never stored directly in the model.
 type dataFrameConnSettings struct {
 	Connection    types.String `tfsdk:"connection"`
 	DatasourceID  types.String `tfsdk:"datasource_id"`
@@ -133,7 +165,12 @@ func (r *dataFrameResource) Create(ctx context.Context, req resource.CreateReque
 	}
 
 	body := map[string]any{"name": plan.Name.ValueString()}
-	if cs := connSettingsBody(plan.ConnectionSettings); cs != nil {
+	cs, d := connSettingsBody(ctx, plan.ConnectionSettings)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if cs != nil {
 		body["connection_settings"] = cs
 	}
 
@@ -142,8 +179,10 @@ func (r *dataFrameResource) Create(ctx context.Context, req resource.CreateReque
 		addAPIError(&resp.Diagnostics, "Error creating dataframe", err)
 		return
 	}
-	r.apply(created, envID, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(r.apply(ctx, created, envID, &plan)...)
+	if !resp.Diagnostics.HasError() {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	}
 }
 
 func (r *dataFrameResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -162,10 +201,10 @@ func (r *dataFrameResource) Read(ctx context.Context, req resource.ReadRequest, 
 		addAPIError(&resp.Diagnostics, "Error reading dataframe", err)
 		return
 	}
-	// connection_settings is config-authoritative (kept from prior state, not
-	// refreshed) so an apply plans clean; only identity fields are mapped back.
-	r.apply(df, state.EnvironmentID.ValueString(), &state)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(r.apply(ctx, df, state.EnvironmentID.ValueString(), &state)...)
+	if !resp.Diagnostics.HasError() {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	}
 }
 
 func (r *dataFrameResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -176,9 +215,13 @@ func (r *dataFrameResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 	envID := plan.EnvironmentID.ValueString()
 
-	// The API only accepts connection_settings on update.
 	patch := map[string]any{}
-	if cs := connSettingsBody(plan.ConnectionSettings); cs != nil {
+	cs, d := connSettingsBody(ctx, plan.ConnectionSettings)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if cs != nil {
 		patch["connection_settings"] = cs
 	}
 
@@ -187,8 +230,10 @@ func (r *dataFrameResource) Update(ctx context.Context, req resource.UpdateReque
 		addAPIError(&resp.Diagnostics, "Error updating dataframe", err)
 		return
 	}
-	r.apply(updated, envID, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(r.apply(ctx, updated, envID, &plan)...)
+	if !resp.Diagnostics.HasError() {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	}
 }
 
 func (r *dataFrameResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -226,12 +271,12 @@ func (r *dataFrameResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("environment_id"), envID)...)
 }
 
-// apply maps fields from an API response onto the model. The dataframe is keyed
-// by name so id mirrors name. connection_settings is mapped back from the API
-// when present (file-zone dataframes), enabling post-import state population and
-// drift detection. Internal dataframes have no connection_settings in the
-// API response — the block stays nil in that case.
-func (r *dataFrameResource) apply(api map[string]any, envID string, m *dataFrameModel) {
+// apply maps API response fields onto the model. For file-zone dataframes the
+// API returns connection_settings and the block is populated. For internal
+// dataframes the API returns nothing and the block is set to null.
+func (r *dataFrameResource) apply(ctx context.Context, api map[string]any, envID string, m *dataFrameModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+
 	name := asString(api["name"])
 	if name == "" {
 		name = m.Name.ValueString()
@@ -240,30 +285,39 @@ func (r *dataFrameResource) apply(api map[string]any, envID string, m *dataFrame
 	m.Name = types.StringValue(name)
 	m.EnvironmentID = types.StringValue(envID)
 
-	// Read back connection_settings for file-zone dataframes. Internal
-	// dataframes return no connection_settings — leave the block nil.
 	if raw, ok := api["connection_settings"]; ok && raw != nil {
 		if cs, ok := raw.(map[string]any); ok && len(cs) > 0 {
-			m.ConnectionSettings = &dataFrameConnSettings{
+			obj, d := types.ObjectValueFrom(ctx, dataFrameConnSettingsAttrTypes, dataFrameConnSettings{
 				Connection:    types.StringValue(asString(cs["connection"])),
 				DatasourceID:  types.StringValue(asString(cs["datasource_id"])),
 				StorageType:   types.StringValue(asString(cs["storage_type"])),
 				DefaultBucket: types.StringValue(asString(cs["default_bucket"])),
-			}
+			})
+			diags.Append(d...)
+			m.ConnectionSettings = obj
+			return diags
 		}
 	}
+	m.ConnectionSettings = types.ObjectNull(dataFrameConnSettingsAttrTypes)
+	return diags
 }
 
-// connSettingsBody renders the typed nested block into the API's
-// connection_settings object, or nil when unset.
-func connSettingsBody(cs *dataFrameConnSettings) map[string]any {
-	if cs == nil {
-		return nil
+// connSettingsBody converts the types.Object model value into the API request
+// body map. Returns nil when the block is null or unknown (internal dataframe or
+// not yet known). Returns diagnostics when As() decoding fails.
+func connSettingsBody(ctx context.Context, cs types.Object) (map[string]any, diag.Diagnostics) {
+	if cs.IsNull() || cs.IsUnknown() {
+		return nil, nil
+	}
+	var s dataFrameConnSettings
+	diags := cs.As(ctx, &s, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, diags
 	}
 	return map[string]any{
-		"connection":     cs.Connection.ValueString(),
-		"datasource_id":  cs.DatasourceID.ValueString(),
-		"storage_type":   cs.StorageType.ValueString(),
-		"default_bucket": cs.DefaultBucket.ValueString(),
-	}
+		"connection":     s.Connection.ValueString(),
+		"datasource_id":  s.DatasourceID.ValueString(),
+		"storage_type":   s.StorageType.ValueString(),
+		"default_bucket": s.DefaultBucket.ValueString(),
+	}, nil
 }
