@@ -169,6 +169,77 @@ That message sends you to re-check the account name and username, which are
 fine. If `key_file_path` is populated on the connection, the upload itself
 succeeded — retry the read before concluding the key is wrong.
 
+## Sourcing credentials from a secrets manager
+
+`parameters_json` and `file_params_content` being write-only keeps credentials
+out of state at the *destination*. It does nothing about where the value came
+from: read a secret with a `data` source and Terraform copies it into state
+verbatim, which puts every credential in that secret — API tokens, database
+passwords, private keys, service-account JSON — into the state file in plain
+text.
+
+Read it with an **ephemeral** resource instead. Ephemeral values are opened,
+used, and closed within a single run and are never written to state or plan
+files:
+
+```hcl
+ephemeral "aws_secretsmanager_secret_version" "creds" {
+  secret_id = var.credentials_secret_id
+}
+
+locals {
+  creds = jsondecode(ephemeral.aws_secretsmanager_secret_version.creds.secret_string)
+}
+
+provider "boomi" {
+  api_url    = var.api_url
+  account_id = var.account_id
+  token      = local.creds.api_token
+}
+
+resource "boomi_data_integration_connection" "snowflake" {
+  name = "Snowflake"
+  type = "snowflake"
+
+  parameters_json = jsonencode({
+    account_name          = "xy12345.us-east-1"
+    username              = "SVC_USER"
+    warehouse             = "COMPUTE_WH"
+    default_database_name = "ANALYTICS"
+    default_schema_name   = "PUBLIC"
+    authentication_type   = "key_pair"
+  })
+
+  # The PEM goes straight from the secret to the upload — never on local disk.
+  file_params_content           = { key_file_path = local.creds.snowflake.private_key }
+  file_params_content_filenames = { key_file_path = "snowflake_key.p8" }
+}
+```
+
+The rules that make this work, and the ones that bite:
+
+- **An ephemeral-derived value may only flow into provider configuration, a
+  write-only resource argument, or another ephemeral resource.** Terraform
+  rejects anything else — a plain resource argument, a `data` block, an
+  `output`. That restriction is not an inconvenience; it is the mechanism that
+  guarantees the value cannot reach state.
+- **Use `file_params_content`, not `file_params`, for a secret-sourced file.**
+  `file_params` takes a *path*, so the material has to exist on disk first.
+  `file_params_content` takes the content directly from memory. Pair it with
+  `file_params_content_filenames` — see the warning above.
+- **Never use `local_sensitive_file`** to materialize a key before uploading it.
+  It writes the file's content into state, defeating the whole arrangement.
+- **One secret need not carry everything.** If the credential for one connector
+  lives in a different secret from the rest, add a second `ephemeral` block and
+  read just that key from it. That is cheaper and less disruptive than merging
+  secrets to suit Terraform.
+- **Requires Terraform >= 1.11** (write-only arguments) and, for this example,
+  `hashicorp/aws` >= 6.0 (the ephemeral Secrets Manager resource). The same
+  shape works with any provider that offers an ephemeral secret resource.
+
+Rotating a credential is then just an `apply` — the new value is read from the
+secret and written to the connection, with nothing to clean up locally.
+
 ## Reaching a database through an SSH tunnel
 
 Databases that aren't publicly routable — or that only allow a bastion host —
