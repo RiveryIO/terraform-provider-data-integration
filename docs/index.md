@@ -13,6 +13,7 @@ Manage Boomi Data Integration resources as code. Authenticates with either a Dat
 ## Where to go next
 
 - [Getting started](guides/getting-started) — install, authenticate, first data flow
+- [Getting started for agents](guides/getting-started-for-agents) — how an LLM coding agent should read these docs and verify its work
 - [Integration patterns by use case](guides/use-cases) — pick your scenario
 - [Examples](guides/examples) — every runnable configuration in the repo
 
