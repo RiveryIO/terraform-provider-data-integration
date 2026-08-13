@@ -108,8 +108,7 @@ resource "boomi_data_integration_data_flow" "mysql_to_snowflake" {
 - `environment_id` (String) Environment this data flow belongs to. Falls back to the provider-level environment_id. Changing it forces a new data flow.
 - `group_id` (String) Group (cross_id) the data flow belongs to. Set to a valid group ID to place the data flow in a specific group, or null to let the platform assign one automatically.
 - `kind` (String) Data flow kind. Defaults to "main_river".
-- `schedule` (Attributes) Typed data flow schedule, mirroring one element of the API's top-level "schedulers" list. Singular because the API accepts at most one scheduler, and mutually exclusive with the deprecated schedulers_json. Optional for non-CDC flows; required and cron-bounded for CDC (log-based) flows — see the CDC data flows guide. (see [below for nested schema](#nestedatt--schedule))
-- `schedulers_json` (String, Deprecated) The data flow schedule as a JSON array, sent top-level as "schedulers"; each item is {"cron_expression": "<5-field UNIX cron>", "is_enabled": true}. At most one scheduler is allowed, and CDC (log-based) flows require an enabled one within the platform's cron bounds — see the CDC data flows guide. DEPRECATED in favour of the typed `schedule` block; setting both is a configuration error.
+- `schedule` (Attributes) Typed data flow schedule, mirroring one element of the API's top-level "schedulers" list. Singular because the API accepts at most one scheduler. Optional for non-CDC flows; required and cron-bounded for CDC (log-based) flows — see the CDC data flows guide. When left unset, reflects the live API value (if any) so drift is visible; the provider will not remove an existing schedule you never declared. (see [below for nested schema](#nestedatt--schedule))
 - `settings` (Attributes) Typed data flow settings, mirroring the API's RiverSettings schema: run_timeout_seconds plus a notification block, and nothing else. Mutually exclusive with the deprecated settings_json. Config-authoritative and server-merged — see "Config-authoritative attributes" below. (see [below for nested schema](#nestedatt--settings))
 - `settings_json` (String, Deprecated) The data flow settings object as JSON. Defaults to an empty object. Config-authoritative — not refreshed from the API. DEPRECATED in favour of the typed `settings` block; setting both is a configuration error.
 
@@ -185,9 +184,9 @@ Optional:
 
 ## Config-authoritative attributes
 
-`properties_json`, `settings` / `settings_json` and `schedule` / `schedulers_json` are all
-**config-authoritative**: the provider writes them and then keeps your configured value in state
-rather than reading them back from the API. Refresh does not touch them.
+`properties_json` and `settings` / `settings_json` are **config-authoritative**: the provider writes
+them and then keeps your configured value in state rather than reading them back from the API.
+Refresh does not touch them.
 
 This is deliberate. The API enriches these fields on write — `logic_steps` gain `step_id` and
 `is_enabled`, `settings` gains a completed `notification` block — so reconciling them would produce
@@ -200,11 +199,31 @@ Two other consequences worth knowing:
 - The update path is a read-modify-write, so a field you *omit* from `settings` keeps whatever the
   data flow already has on the server; it is not reset.
 - A typed block and its deprecated JSON counterpart write the same API field. Setting both
-  (`settings` + `settings_json`, or `schedule` + `schedulers_json`) is rejected at plan time with an
-  attribute-scoped error rather than one silently winning.
+  `settings` + `settings_json` is rejected at plan time with an attribute-scoped error rather than
+  one silently winning.
+
+`schedule` is different: it is **refreshed on every read**, not config-authoritative. A change made
+in the console shows up as a real plan diff, and applying it restores your configured value — see
+"Scheduling and drift" below.
 
 Everything else — `name`, `kind`, `type`, `description`, `group_id`, `activate`/`status` — is
 reconciled normally on refresh.
+
+## Scheduling and drift
+
+`schedule` mirrors the API's one-item `schedulers` list. Set it, and the provider keeps that exact
+value applied, correcting anything that drifts away from it:
+
+```hcl
+schedule = {
+  cron_expression = "0 */4 * * *" # every four hours
+  is_enabled      = true
+}
+```
+
+Leave it unset and the attribute still reflects whatever schedule actually exists on the flow — so
+`terraform show` tells you the truth even when Terraform isn't managing it — but the provider will
+never remove or overwrite a schedule it was never told to manage.
 
 ## Activation
 

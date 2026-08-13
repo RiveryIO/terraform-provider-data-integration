@@ -2,7 +2,7 @@
 #
 # boomi_data_integration_data_flow_run is deprecated and will be removed in a
 # future major version. Terraform manages desired state; it does not run flows.
-# Trigger runs from the data flow's own schedule (schedulers_json on
+# Trigger runs from the data flow's own schedule (schedule on
 # boomi_data_integration_data_flow, or the platform scheduler), or with a direct
 # API call from your orchestrator / CI pipeline. Activation stays in Terraform as
 # the `activate` attribute on boomi_data_integration_data_flow.
