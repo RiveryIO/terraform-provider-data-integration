@@ -27,7 +27,10 @@ type connectionTypeModel struct {
 	ConnectionType     types.String `tfsdk:"connection_type"`
 	ConnectionTypeName types.String `tfsdk:"connection_type_name"`
 	PropertyNames      types.List   `tfsdk:"property_names"`
-	PropertiesJSON     types.String `tfsdk:"properties_json"`
+	PropertySchemaJSON types.String `tfsdk:"property_schema_json"`
+	// PropertiesJSON is the deprecated alias of PropertySchemaJSON. Both are
+	// populated from the same API response until the alias is removed.
+	PropertiesJSON types.String `tfsdk:"properties_json"`
 }
 
 func (d *connectionTypeDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -39,8 +42,9 @@ func (d *connectionTypeDataSource) Schema(_ context.Context, _ datasource.Schema
 		Description: "The property schema of a single connection type, read from the live Data " +
 			"Integration API. Use it to discover which fields belong in a boomi_connection's " +
 			"parameters_json for a given type — the field set stays current as the API evolves, with " +
-			"no provider release required. `properties_json` carries the full, raw property schema " +
-			"(each type's shape differs), and `property_names` extracts the field ids for convenience.",
+			"no provider release required. `property_schema_json` carries the full, raw property " +
+			"schema (each type's shape differs), and `property_names` extracts the field ids for " +
+			"convenience.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -60,11 +64,25 @@ func (d *connectionTypeDataSource) Schema(_ context.Context, _ datasource.Schema
 				Description: "The ids of the type's configurable properties — the keys valid in a " +
 					"boomi_connection parameters_json for this type.",
 			},
-			"properties_json": schema.StringAttribute{
+			"property_schema_json": schema.StringAttribute{
 				Computed: true,
 				Description: "The full property schema as raw JSON (a list of property objects, each " +
 					"with id/type and optional display_name/ui_type/default_value/etc.). Kept opaque " +
-					"because each connection type's property shape differs.",
+					"because each connection type's property shape differs. Read-only metadata " +
+					"describing which fields a connection accepts — not a payload: it is the inverse " +
+					"direction of a data flow's properties_json, which you author and the API " +
+					"consumes.",
+			},
+			"properties_json": schema.StringAttribute{
+				Computed: true,
+				DeprecationMessage: "Use `property_schema_json` instead — same value, a name that " +
+					"does not collide with the data flow resource's `properties_json`, which is an " +
+					"authored payload rather than read-only schema metadata. `properties_json` keeps " +
+					"working and is planned for removal in a future major version.",
+				Description: "Deprecated alias of `property_schema_json`, carrying the identical " +
+					"value. Renamed because a data flow's `properties_json` is a payload you write " +
+					"while this attribute is schema metadata the API returns; sharing one name made " +
+					"the two read as the same thing.",
 			},
 		},
 	}
@@ -114,14 +132,17 @@ func (d *connectionTypeDataSource) Read(ctx context.Context, req datasource.Read
 			}
 		}
 		if raw, err := json.Marshal(props); err == nil {
-			state.PropertiesJSON = types.StringValue(string(raw))
+			state.PropertySchemaJSON = types.StringValue(string(raw))
 		} else {
 			resp.Diagnostics.AddError("Error encoding properties", err.Error())
 			return
 		}
 	} else {
-		state.PropertiesJSON = types.StringValue("[]")
+		state.PropertySchemaJSON = types.StringValue("[]")
 	}
+	// Deprecated alias: identical value, so a config that still reads
+	// properties_json keeps working until the attribute is removed.
+	state.PropertiesJSON = state.PropertySchemaJSON
 
 	nameList, diags := types.ListValueFrom(ctx, types.StringType, names)
 	resp.Diagnostics.Append(diags...)

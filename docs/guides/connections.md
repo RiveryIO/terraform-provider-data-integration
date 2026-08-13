@@ -43,10 +43,15 @@ output "snowflake_properties" {
 
 `property_names` is the list of keys valid inside that connection's
 `parameters_json` — exactly the keys the live API will accept, no more, no
-less. `properties_json` (singular object, not to be confused with the
-connection resource's `parameters_json`) carries the full property schema —
-types, whether a field is required, whether it's a file upload — as raw JSON,
-for building your own tooling on top of it.
+less. `property_schema_json` carries the full property schema — types, whether
+a field is required, whether it's a file upload — as raw JSON, for building
+your own tooling on top of it.
+
+-> `property_schema_json` was previously named `properties_json`. The old name
+still works and returns the same value, but it is deprecated. Both it and a data
+flow's `properties_json` shared a name while meaning opposite things: the data
+flow attribute is a payload you author and the API consumes, whereas this one is
+read-only schema metadata the API returns.
 
 ## Finding the right properties for a target
 
