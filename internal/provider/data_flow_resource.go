@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -273,6 +274,22 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				// plan value (a raw struct pointer could not — see
 				// dataFlowScheduleModel's doc comment).
 				Computed: true,
+				// UseStateForUnknown, unlike schedulers_json (a flat scalar), is required
+				// here — confirmed live, not assumed. A nested Computed attribute with no
+				// plan modifier plans as Unknown on EVERY plan when config is null, even a
+				// pure refresh with nothing else changing, because its inner attributes
+				// (cron_expression/is_enabled) are Optional-only, not Computed, so the
+				// framework has no way to propose "keep whatever's in state" for the object
+				// as a whole without this modifier — unlike a scalar, which the framework
+				// defaults to reusing from state. Reproduced against a real CDC river
+				// managed via schedulers_json (schedule left unmanaged): every single
+				// `terraform plan` showed schedule -> (known after apply), forever, never
+				// settling to "No changes". This modifier only fires when config is null
+				// (the unmanaged case); it does NOT affect drift detection when config
+				// explicitly sets schedule, since an explicit config value always wins the
+				// plan regardless of state or plan modifiers — verified live both before
+				// and after adding this.
+				PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
 				Description: "Typed data flow schedule, mirroring one element of the API's top-level " +
 					"\"schedulers\" list. Singular because the API accepts at most one scheduler, and " +
 					"mutually exclusive with the deprecated schedulers_json. Optional for non-CDC " +

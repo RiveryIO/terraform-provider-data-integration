@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -1173,6 +1175,18 @@ func TestDataFlowSchemaTypedBlocks(t *testing.T) {
 	// visibility at all.
 	if !sched.Optional || !sched.Computed {
 		t.Errorf("schedule must be Optional+Computed, got Optional=%v Computed=%v", sched.Optional, sched.Computed)
+	}
+	// Confirmed live against a real CDC river: without this modifier, an
+	// unmanaged (or schedulers_json-managed) schedule never settles -- every
+	// single `terraform plan` shows schedule -> (known after apply), forever,
+	// even with nothing else changing. schedulers_json (a flat scalar) has no
+	// such modifier and converges fine; schedule (nested, with Optional-only
+	// inner attributes) needs it explicitly.
+	if len(sched.PlanModifiers) != 1 {
+		t.Fatalf("schedule must carry exactly one plan modifier (UseStateForUnknown), got %d", len(sched.PlanModifiers))
+	}
+	if gotType, wantType := reflect.TypeOf(sched.PlanModifiers[0]), reflect.TypeOf(objectplanmodifier.UseStateForUnknown()); gotType != wantType {
+		t.Errorf("schedule's plan modifier is %v, want %v", gotType, wantType)
 	}
 
 	for _, name := range []string{"settings_json", "schedulers_json"} {
