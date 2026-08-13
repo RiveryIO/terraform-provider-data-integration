@@ -116,3 +116,42 @@ field table, the discovery data source, and the exact contract live in
 `target` is discriminated on `name` — which destination you're writing to — and is the same union
 regardless of source type, so it's documented once, in
 [Loading methods](./loading-methods.md#the-target-union), rather than repeated per source guide.
+
+## `properties_json` is not write-only — no ephemeral values anywhere inside it
+
+Only two attributes in this whole provider are write-only: `parameters_json` and
+`file_params_content`, both on `boomi_data_integration_connection` — see
+[Connections](./connections.md#keyfile-backed-credentials). That's what lets a connection pull a
+credential straight from an `ephemeral` resource without it ever touching state.
+
+`properties_json` on `boomi_data_integration_data_flow` is an **ordinary** attribute. It is persisted
+to state like any other field. That means **no value derived from an `ephemeral` resource may appear
+anywhere inside it** — not just the obvious secret, but a plain, non-sensitive field (a database name,
+a schema name) if that value happens to have been read out of the same ephemeral secret. Terraform
+tracks ephemerality per-value, not per-field-name, so it doesn't matter that the field itself isn't
+sensitive; what matters is where the value came from.
+
+The error, from a real `apply`, is:
+
+```
+Ephemeral values are not valid for "properties_json", because it is not a
+write-only attribute and must be persisted to state.
+```
+
+Two things make this one slow to track down:
+
+- The diagnostic names the attribute (`properties_json`) but not *which value* inside the
+  `jsonencode()` call was ephemeral.
+- It surfaces late. The connection applies fine — `parameters_json` is write-only there, so an
+  ephemeral value is perfectly legal on it — and only the data flow's plan fails, once you try to
+  reuse the same secret's non-credential fields on `properties_json`.
+
+**The fix:** use a literal or a plain (non-ephemeral) variable for structural values like this —
+table names, schema names, loading method, connection IDs (connection IDs are fine; they're ordinary
+resource attributes, not ephemeral values).
+
+!> **Do not "fix" this by turning the `ephemeral "aws_secretsmanager_secret_version"` block into a
+`data` block instead.** That makes the error disappear, but it also writes the **entire secret** into
+`terraform.tfstate` in plaintext — the opposite of what the ephemeral resource was for. Credentials
+belong on the connection, where `parameters_json`/`file_params_content` are write-only.
+`properties_json` should carry only non-secret structure.

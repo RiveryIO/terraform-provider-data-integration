@@ -119,8 +119,12 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"provider uploads the file via the connection-files API and injects the returned " +
 					"server-side path into the connection body under that field name. " +
 					"Use this for any credential file: Snowflake P8 keys, GCS/BQ service-account JSON, " +
-					"SSH keys, etc. The uploaded paths are stored in file_param_paths. " +
-					"Write-only: local paths are never stored in state.",
+					"SSH keys, etc. The server-side paths returned by the upload are stored in " +
+					"file_param_paths. Unlike file_params_content, this attribute is only Sensitive, not " +
+					"write-only: the local paths given here ARE persisted to state (masked in CLI output, " +
+					"but present in the state file). If the credential itself must stay out of both local " +
+					"disk and state, use file_params_content instead, which is write-only and accepts " +
+					"values from an ephemeral resource.",
 			},
 			"file_params_content": schema.MapAttribute{
 				Optional:    true,

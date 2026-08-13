@@ -79,11 +79,24 @@ resource "boomi_data_integration_data_flow_variables" "issues_flow_vars" {
 
 - `is_multi_value` — the value is a JSON array string (`'[1,2]'`), not a
   scalar.
-- `is_encrypted` — provide plaintext on write; the API encrypts it, and state
-  stores the ciphertext, not the plaintext you wrote.
+- `is_encrypted` — marks the variable as private on the platform side. It
+  governs how the platform stores and displays the value; it has no effect on
+  what Terraform keeps in state (see the warning below).
 - `clear_value_on_start` — whether the runtime resets this variable's value
   at the start of every run (useful for a lookback counter you want to
   recompute each time, rather than persist).
+
+!> **`is_encrypted` does not keep the value out of Terraform state.** The
+value you write for `value` lands in `terraform.tfstate` as plaintext
+regardless of `is_encrypted`, and it stays there across a `terraform refresh`.
+Treat the state file as holding that secret in the clear, and protect it
+accordingly (encrypted remote state, restricted access). If you need a secret
+that never touches
+state, this resource can't do it; use the write-only pattern instead — an
+`ephemeral` resource feeding a write-only attribute, the same shape
+[Connections](./connections.md#keyfile-backed-credentials) uses for
+`parameters_json`/`file_params_content`. `data_flow_variables` has no
+write-only value attribute today, so that path isn't available here.
 
 Order in the `variable` block list is preserved as returned by the API.
 

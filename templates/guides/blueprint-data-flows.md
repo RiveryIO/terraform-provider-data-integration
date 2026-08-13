@@ -36,8 +36,14 @@ resource "boomi_data_integration_blueprint" "posts" {
 
 | Resource | Holds | Key fields |
 | --- | --- | --- |
-| [`boomi_data_integration_blueprint_file`](../resources/data_integration_blueprint_file) | The YAML itself | `filename`, `content` (both required; `content` is sensitive and never read back from the API) |
+| [`boomi_data_integration_blueprint_file`](../resources/data_integration_blueprint_file) | The YAML itself | `filename`, `content` (both required; `content` is sensitive, stored in state, and never read back from the API) |
 | [`boomi_data_integration_blueprint`](../resources/data_integration_blueprint) | The named blueprint | `name` (required), `file_cross_id` (required — the file resource's `id`), `description` |
+
+`content` being "never read back from the API" sounds like a privacy win, but it's only half the
+story: it's also **stored in state**, in plaintext, same as any other non-write-only attribute. That
+matters more here than it would elsewhere, because a blueprint's entire purpose is describing how to
+call an API — so it's routine for that YAML to embed auth headers, API keys, or bearer tokens
+directly. Whatever credential material ends up in `content` ends up in `terraform.tfstate`.
 
 The split matters for two reasons:
 

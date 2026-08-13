@@ -139,7 +139,11 @@ func (d *sourceMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 			"primary output `schemas_json` is a ready-to-use `properties.schemas[]` block — decode it " +
 			"with `jsondecode()` into a data flow's `properties_json`. `schemas` exposes the same " +
 			"discovery as typed nested objects for inspection. RDBMS sources only (mysql, postgres, " +
-			"sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported.",
+			"sqlserver, oracle, …); API/SaaS connector metadata routing is not yet supported. " +
+			"Cost note: discovery costs one live platform request per requested table, issued " +
+			"serially — this is cheaper than a separate connection_test only when discovering a " +
+			"single table or the whole schema at once; requesting many individual tables means many " +
+			"sequential round trips against the same worker pool, each bounded by timeouts.read.",
 		Blocks: map[string]schema.Block{
 			"timeouts": schema.SingleNestedBlock{
 				Description: "How long to wait for the metadata discovery to finish.",
@@ -147,7 +151,12 @@ func (d *sourceMetadataDataSource) Schema(_ context.Context, _ datasource.Schema
 					"read": schema.StringAttribute{
 						Optional: true,
 						Description: "Go duration string (e.g. \"3m\", \"90s\") bounding the discovery " +
-							"poll. Default \"3m\".",
+							"poll. Default \"3m\". Discovery issues one live pull request per requested " +
+							"table, serially, and this bound applies PER TABLE rather than as a total " +
+							"budget for the whole read: with N tables in the tables attribute, the worst " +
+							"case is N times this value (e.g. ten tables at the 3m default is up to 30m), " +
+							"even though a single-table or whole-schema request normally finishes well " +
+							"inside one timeout window.",
 					},
 				},
 			},
@@ -388,6 +397,22 @@ func (d *sourceMetadataDataSource) Read(ctx context.Context, req datasource.Read
 	// One metadata pull request per requested table (the verified API mechanic
 	// takes a single table_name), or a single request with no table_name to
 	// discover the whole schema. Results are merged into one nested payload.
+	//
+	// These requests are issued SERIALLY, one at a time — each is polled to a
+	// terminal state ("D"one or an error) before the next table's request is
+	// even sent. There is no batching or fan-out endpoint on the platform side
+	// to collapse them into one call, and we deliberately do not parallelise
+	// this loop: firing concurrent pull requests at the same worker pool that
+	// connection_test warns is already contended (see that data source's
+	// Description) risks making contention worse rather than better, and the
+	// concurrent-request behaviour has not been verified against the live API.
+	//
+	// `timeout` below is the per-request bound from timeouts.read (default
+	// 3m) — it is NOT a total budget for this loop. It is checked fresh on
+	// every iteration, so N requested tables can take up to N * timeout in
+	// the worst case (e.g. ten tables => up to 30 minutes), even though a
+	// single-table or whole-schema discovery finishes well inside one
+	// timeout window.
 	merged := map[string]any{}
 	requests := tables
 	if len(requests) == 0 {

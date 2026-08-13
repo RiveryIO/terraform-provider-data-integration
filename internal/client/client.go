@@ -839,7 +839,13 @@ func (c *Client) DeleteVariable(ctx context.Context, environmentID, key string) 
 type DataFlowVariableSettings struct {
 	ClearValueOnStart bool `json:"clear_value_on_start"`
 	IsMultiValue      bool `json:"is_multi_value"`
-	IsEncrypted       bool `json:"is_encrypted"`
+	// The API's field for this is `is_private`, not `is_encrypted`. It silently
+	// drops unknown keys inside `settings`, so tagging this `is_encrypted` made
+	// the flag a no-op AND drove a perpetual `false -> true` plan diff, because
+	// the read always came back false. Verified live 2026-08-12: PUT with
+	// is_encrypted echoes {"is_private": false}; PUT with is_private echoes
+	// {"is_private": true}. The Terraform attribute stays `is_encrypted`.
+	IsEncrypted bool `json:"is_private"`
 }
 
 // DataFlowVariable is a single item in the data flow variables collection.

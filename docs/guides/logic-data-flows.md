@@ -106,6 +106,10 @@ resource "boomi_data_integration_logicode_file" "transform" {
 The logicode file API is create-and-read only: any change to `filename` or `content` forces a new file
 and therefore a new `file_id`, which Terraform propagates into `properties_json` automatically.
 
+`content` is never read back from the API — but it **is** stored in state, in plaintext, like any
+other non-write-only attribute. If the script embeds a credential or token directly (rather than
+pulling it from a data flow variable at run time), that value ends up in `terraform.tfstate`.
+
 ## `run_once` — an ordered (or parallel) container
 
 ```hcl
