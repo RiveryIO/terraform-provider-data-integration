@@ -124,19 +124,18 @@ locals {
   # The schedule that drives "track forward". Sent top-level as "schedulers";
   # exactly one scheduler is allowed and the cron must fire between once per day
   # and 12 times per hour.
-  #
-  # NOTE: a typed `schedule` block (cron_expression + is_enabled) has landed on
-  # this repo's main branch and deprecates schedulers_json, but it is NOT in the
-  # released v1.1.0 this example pins against. Switch to the typed block once
-  # the next version ships.
-  schedulers = [{
+  schedule = {
     cron_expression = var.schedule_cron
     is_enabled      = var.schedule_enabled
-  }]
+  }
 
-  # Same story for `settings_json`: a typed `settings` block exists on main but
-  # not in v1.1.0. A backfill window can run long, so give the flow a real
-  # timeout instead of leaving it on automatic calculation.
+  # A backfill window can run long, so give the flow a real timeout instead of
+  # leaving it on automatic calculation.
+  #
+  # NOTE: a typed `settings` block (run_timeout_seconds + notification) has
+  # landed on this repo's main branch and deprecates settings_json, but it is
+  # NOT in the released v1.1.0 this example pins against. Switch to the typed
+  # block once the next version ships.
   settings = {
     run_timeout_seconds = var.run_timeout_seconds
   }
@@ -244,9 +243,9 @@ resource "boomi_data_integration_data_flow" "discovery_driven" {
     schemas = local.discovered_schemas_with_keys
   })
 
-  settings_json   = jsonencode(local.settings)
-  schedulers_json = jsonencode(local.schedulers)
-  group_id        = var.group_id
+  settings_json = jsonencode(local.settings)
+  schedule      = local.schedule
+  group_id      = var.group_id
 
   # `activate` on the released v1.1.0 defaults to false. On this repo's main
   # branch the default has been REMOVED: omitting it means activation is
@@ -365,10 +364,10 @@ resource "boomi_data_integration_data_flow" "hand_written" {
     schemas = local.hand_written_schemas
   })
 
-  settings_json   = jsonencode(local.settings)
-  schedulers_json = jsonencode(local.schedulers)
-  group_id        = var.group_id
-  activate        = var.activate
+  settings_json = jsonencode(local.settings)
+  schedule      = local.schedule
+  group_id      = var.group_id
+  activate      = var.activate
 }
 
 # ── Outputs ───────────────────────────────────────────────────────────────────

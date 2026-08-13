@@ -629,7 +629,7 @@ func TestDataFlowUpdateSkipsDisableForLogicType(t *testing.T) {
 					"type":            tftypes.NewValue(tftypes.String, "logic"),
 					"properties_json": tftypes.NewValue(tftypes.String, logicProps),
 					"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-					"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+					"schedule":        scheduleTFValue("0 * * * *", true),
 					"activate":        boolRaw(types.BoolValue(activate)),
 					"status":          stringRaw(types.StringValue(riverStatusActive)),
 					"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
@@ -709,7 +709,7 @@ func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 			"properties_json": tftypes.NewValue(tftypes.String, props),
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"schedule":        scheduleTFValue("0 * * * *", true),
 			"activate":        boolRaw(types.BoolValue(true)),
 			"status":          stringRaw(types.StringValue(riverStatusActive)),
 			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
@@ -741,7 +741,7 @@ func TestDataFlowUpdateDisablesRiverBeforePropertiesChange(t *testing.T) {
 
 // TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged reproduces a
 // real failure against a live river: an update whose only tracked change was
-// schedulers_json (properties byte-for-byte identical between plan and
+// the schedule (properties byte-for-byte identical between plan and
 // state) still 400'd with the locked-properties error. Cause: properties_json
 // is config-authoritative and always overwrites the server's copy verbatim,
 // but the API silently enriches properties server-side with fields config
@@ -775,7 +775,7 @@ func TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged(t *testing.T) {
 	r := &dataFlowResource{data: &providerData{client: c, defaultEnvironmentID: "env1"}}
 	s := dataFlowSchemaForTest(t)
 
-	build := func(schedulersJSON tftypes.Value) tftypes.Value {
+	build := func(schedule tftypes.Value) tftypes.Value {
 		return dataFlowObjectForTest(t, s, map[string]tftypes.Value{
 			"id":              tftypes.NewValue(tftypes.String, "river1"),
 			"environment_id":  tftypes.NewValue(tftypes.String, "env1"),
@@ -784,15 +784,15 @@ func TestDataFlowUpdateDisablesRiverEvenWhenPropertiesUnchanged(t *testing.T) {
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 			"properties_json": tftypes.NewValue(tftypes.String, cdcProps),
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-			"schedulers_json": schedulersJSON,
+			"schedule":        schedule,
 			"activate":        boolRaw(types.BoolValue(true)),
 			"status":          stringRaw(types.StringValue(riverStatusActive)),
 			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
 		})
 	}
-	// properties_json is identical on both sides; only schedulers_json differs.
-	planRaw := build(tftypes.NewValue(tftypes.String, nil))
-	stateRaw := build(tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`))
+	// properties_json is identical on both sides; only the schedule differs.
+	planRaw := build(scheduleTFNull())
+	stateRaw := build(scheduleTFValue("0 * * * *", true))
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Raw: stateRaw, Schema: s}}
 	r.Update(ctx, resource.UpdateRequest{
@@ -855,7 +855,7 @@ func TestDataFlowUpdateSkipsDisableForNonCDCActiveFlow(t *testing.T) {
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 			"properties_json": tftypes.NewValue(tftypes.String, batchProps),
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"schedule":        scheduleTFValue("0 * * * *", true),
 			"activate":        boolRaw(types.BoolValue(true)),
 			"status":          stringRaw(types.StringValue(riverStatusActive)),
 			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
@@ -919,7 +919,7 @@ func TestDataFlowUpdateDeactivationDisablesRiverOnce(t *testing.T) {
 			"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 			"properties_json": tftypes.NewValue(tftypes.String, cdcProps), // unchanged on both sides
 			"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-			"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+			"schedule":        scheduleTFValue("0 * * * *", true),
 			"activate":        boolRaw(types.BoolValue(activate)),
 			"status":          stringRaw(types.StringValue(riverStatusActive)),
 			"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
@@ -1052,6 +1052,33 @@ func boolRaw(v types.Bool) tftypes.Value {
 	}
 }
 
+// scheduleTFType is the raw tftypes shape of the schedule attribute, shared
+// by every test that hand-builds a full resource object.
+func scheduleTFType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"cron_expression": tftypes.String, "is_enabled": tftypes.Bool,
+	}}
+}
+
+// scheduleTFValue builds a known, non-null schedule value for raw tftypes test objects.
+func scheduleTFValue(cron string, enabled bool) tftypes.Value {
+	return tftypes.NewValue(scheduleTFType(), map[string]tftypes.Value{
+		"cron_expression": tftypes.NewValue(tftypes.String, cron),
+		"is_enabled":      tftypes.NewValue(tftypes.Bool, enabled),
+	})
+}
+
+// scheduleTFUnknown builds an unknown schedule value, matching the real plan
+// value Terraform proposes for schedule on create (Optional+Computed, unset).
+func scheduleTFUnknown() tftypes.Value {
+	return tftypes.NewValue(scheduleTFType(), tftypes.UnknownValue)
+}
+
+// scheduleTFNull builds a null schedule value for raw tftypes test objects.
+func scheduleTFNull() tftypes.Value {
+	return tftypes.NewValue(scheduleTFType(), nil)
+}
+
 func stringRaw(v types.String) tftypes.Value {
 	switch {
 	case v.IsUnknown():
@@ -1083,7 +1110,7 @@ func dataFlowCreatePlanForTest(t *testing.T, s schema.Schema, props string, acti
 		"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 		"properties_json": tftypes.NewValue(tftypes.String, props),
 		"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-		"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+		"schedule":        scheduleTFUnknown(),
 		"group_id":        tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
 		"activate":        boolRaw(activate),
 		"status":          tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
@@ -1103,7 +1130,7 @@ func dataFlowUpdatePlanForTest(
 		"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 		"properties_json": tftypes.NewValue(tftypes.String, props),
 		"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-		"schedulers_json": tftypes.NewValue(tftypes.String, `[{"cron_expression":"0 * * * *","is_enabled":true}]`),
+		"schedule":        scheduleTFValue("0 * * * *", true),
 		"activate":        boolRaw(activate),
 		"status":          stringRaw(status),
 		"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
@@ -1130,9 +1157,12 @@ func diffStrings(got, want []string) string {
 }
 
 // ── typed settings / schedule tests ───────────────────────────────────────────
-// TestDataFlowSchemaTypedBlocks asserts the typed blocks exist alongside — not
-// instead of — the deprecated JSON attributes, and that the JSON ones now carry
-// a deprecation message.
+// TestDataFlowSchemaTypedBlocks asserts the typed blocks exist, that
+// settings_json still carries a deprecation message (settings has no
+// equivalent removal), and that schedulers_json is gone entirely — there
+// are no clients on this provider yet, so the deprecated JSON representation
+// of the schedule was removed outright instead of waiting for a major
+// version bump.
 func TestDataFlowSchemaTypedBlocks(t *testing.T) {
 	resp := &resource.SchemaResponse{}
 	NewDataFlowResource().Schema(context.Background(), resource.SchemaRequest{}, resp)
@@ -1169,19 +1199,17 @@ func TestDataFlowSchemaTypedBlocks(t *testing.T) {
 	if len(sched.Attributes) != 2 {
 		t.Errorf("schedule should mirror RiverSchedule's 2 fields, got %d", len(sched.Attributes))
 	}
-	// Optional+Computed, mirroring schedulers_json — this is what lets Read()
-	// reflect an out-of-band schedule change as a real plan diff (CORE-2583
-	// AC9) instead of silently overwriting it on the next apply with no
-	// visibility at all.
+	// Optional+Computed — this is what lets Read() reflect an out-of-band
+	// schedule change as a real plan diff (CORE-2583 AC9) instead of
+	// silently overwriting it on the next apply with no visibility at all.
 	if !sched.Optional || !sched.Computed {
 		t.Errorf("schedule must be Optional+Computed, got Optional=%v Computed=%v", sched.Optional, sched.Computed)
 	}
 	// Confirmed live against a real CDC river: without this modifier, an
-	// unmanaged (or schedulers_json-managed) schedule never settles -- every
-	// single `terraform plan` shows schedule -> (known after apply), forever,
-	// even with nothing else changing. schedulers_json (a flat scalar) has no
-	// such modifier and converges fine; schedule (nested, with Optional-only
-	// inner attributes) needs it explicitly.
+	// unmanaged schedule never settles -- every single `terraform plan`
+	// shows schedule -> (known after apply), forever, even with nothing
+	// else changing, because schedule is a nested object with Optional-only
+	// inner attributes.
 	if len(sched.PlanModifiers) != 1 {
 		t.Fatalf("schedule must carry exactly one plan modifier (UseStateForUnknown), got %d", len(sched.PlanModifiers))
 	}
@@ -1189,14 +1217,16 @@ func TestDataFlowSchemaTypedBlocks(t *testing.T) {
 		t.Errorf("schedule's plan modifier is %v, want %v", gotType, wantType)
 	}
 
-	for _, name := range []string{"settings_json", "schedulers_json"} {
-		attr, ok := resp.Schema.Attributes[name].(schema.StringAttribute)
-		if !ok {
-			t.Fatalf("%s must remain a string attribute (non-breaking)", name)
-		}
-		if attr.DeprecationMessage == "" {
-			t.Errorf("%s should carry a DeprecationMessage", name)
-		}
+	settingsJSON, ok := resp.Schema.Attributes["settings_json"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("settings_json must remain a string attribute (non-breaking)")
+	}
+	if settingsJSON.DeprecationMessage == "" {
+		t.Errorf("settings_json should carry a DeprecationMessage")
+	}
+
+	if _, present := resp.Schema.Attributes["schedulers_json"]; present {
+		t.Error("schedulers_json must be removed from the schema entirely -- no clients depend on it")
 	}
 }
 
@@ -1210,7 +1240,6 @@ func baseDataFlowModel() dataFlowModel {
 		PropertiesJSON: jsontypes.NewNormalizedValue(`{"properties_type":"source_to_target"}`),
 		SettingsJSON:   jsontypes.NewNormalizedNull(),
 		Schedule:       types.ObjectNull(dataFlowScheduleAttrTypes()),
-		SchedulersJSON: jsontypes.NewNormalizedNull(),
 	}
 }
 
@@ -1314,8 +1343,7 @@ func TestBuildBodyTypedScheduleWrapsIntoSchedulersList(t *testing.T) {
 	}
 }
 
-// The CDC path in Update() keys off body["schedulers"] being present. The typed
-// block must satisfy that check exactly as schedulers_json does.
+// The CDC path in Update() keys off body["schedulers"] being present.
 func TestBuildBodyTypedScheduleSatisfiesCDCSchedulerCheck(t *testing.T) {
 	plan := baseDataFlowModel()
 	plan.PropertiesJSON = jsontypes.NewNormalizedValue(
@@ -1341,23 +1369,19 @@ func TestBuildBodyTypedScheduleSatisfiesCDCSchedulerCheck(t *testing.T) {
 
 func TestBuildBodyNoScheduleOmitsSchedulersKey(t *testing.T) {
 	if _, present := buildBodyOrFail(t, baseDataFlowModel())["schedulers"]; present {
-		t.Fatal("schedulers must be absent when neither schedule nor schedulers_json is set")
+		t.Fatal("schedulers must be absent when schedule is not set")
 	}
 }
 
-// ── the deprecated JSON attributes must keep working unchanged ────────────────
+// ── the deprecated settings_json attribute must keep working unchanged ────────
 
-func TestBuildBodyJSONAttributesStillWork(t *testing.T) {
+func TestBuildBodySettingsJSONStillWorks(t *testing.T) {
 	plan := baseDataFlowModel()
 	plan.SettingsJSON = jsontypes.NewNormalizedValue(`{"run_timeout_seconds":180}`)
-	plan.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"cron_expression":"0 0 * * *","is_enabled":true}]`)
 
 	body := buildBodyOrFail(t, plan)
 	if got := mustJSON(t, body["settings"]); got != `{"run_timeout_seconds":180}` {
 		t.Fatalf("settings_json body mismatch: %s", got)
-	}
-	if got := mustJSON(t, body["schedulers"]); got != `[{"cron_expression":"0 0 * * *","is_enabled":true}]` {
-		t.Fatalf("schedulers_json body mismatch: %s", got)
 	}
 }
 
@@ -1389,33 +1413,18 @@ func TestValidateDataFlowExclusivitySettingsConflict(t *testing.T) {
 	}
 }
 
-func TestValidateDataFlowExclusivityScheduleConflict(t *testing.T) {
-	cfg := baseDataFlowModel()
-	cfg.Schedule = scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)})
-	cfg.SchedulersJSON = jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`)
-
-	diags := validateDataFlowExclusivity(cfg)
-	if !diags.HasError() {
-		t.Fatal("expected an error when both schedule and schedulers_json are set")
-	}
-	if s := diags.Errors()[0].Summary(); s != "Conflicting configuration: schedule and schedulers_json" {
-		t.Fatalf("unexpected diagnostic summary: %q", s)
-	}
-}
-
 func TestValidateDataFlowExclusivityAllowsEitherAlone(t *testing.T) {
 	cases := map[string]dataFlowModel{
 		"neither": baseDataFlowModel(),
-		"typed only": func() dataFlowModel {
+		"typed settings only": func() dataFlowModel {
 			m := baseDataFlowModel()
 			m.Settings = &dataFlowSettingsModel{RunTimeoutSeconds: types.Int64Value(60)}
 			m.Schedule = scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)})
 			return m
 		}(),
-		"json only": func() dataFlowModel {
+		"settings_json only": func() dataFlowModel {
 			m := baseDataFlowModel()
 			m.SettingsJSON = jsontypes.NewNormalizedValue(`{}`)
-			m.SchedulersJSON = jsontypes.NewNormalizedValue(`[]`)
 			return m
 		}(),
 	}
@@ -1437,24 +1446,20 @@ func TestValidateDataFlowScheduleRequiredForCDC(t *testing.T) {
 		name      string
 		props     string
 		schedule  types.Object
-		schedJSON jsontypes.Normalized
 		wantError bool
 	}{
 		{"CDC without a schedule errors", cdcProps,
-			types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedNull(), true},
+			types.ObjectNull(dataFlowScheduleAttrTypes()), true},
 		{"CDC with a typed schedule is fine", cdcProps,
-			scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}), jsontypes.NewNormalizedNull(), false},
-		{"CDC with schedulers_json is fine", cdcProps,
-			types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`), false},
+			scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}), false},
 		{"non-CDC (incremental) without a schedule is fine", batchProps,
-			types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedNull(), false},
+			types.ObjectNull(dataFlowScheduleAttrTypes()), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := baseDataFlowModel()
 			cfg.PropertiesJSON = jsontypes.NewNormalizedValue(tc.props)
 			cfg.Schedule = tc.schedule
-			cfg.SchedulersJSON = tc.schedJSON
 
 			diags := validateDataFlowScheduleRequiredForCDC(cfg)
 			if diags.HasError() != tc.wantError {
@@ -1499,22 +1504,18 @@ func TestScheduleRemovalNeeded(t *testing.T) {
 // declaring a schedule via either representation, and only that.
 func TestScheduleConfigured(t *testing.T) {
 	cases := []struct {
-		name      string
-		schedule  types.Object
-		schedJSON jsontypes.Normalized
-		want      bool
+		name     string
+		schedule types.Object
+		want     bool
 	}{
-		{"neither set", types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedNull(), false},
-		{"typed schedule set", scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}), jsontypes.NewNormalizedNull(), true},
-		{"schedulers_json set", types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedValue(`[{"is_enabled":true}]`), true},
-		{"schedulers_json unknown counts as unset", types.ObjectNull(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedUnknown(), false},
-		{"schedule unknown counts as unset", types.ObjectUnknown(dataFlowScheduleAttrTypes()), jsontypes.NewNormalizedNull(), false},
+		{"not set", types.ObjectNull(dataFlowScheduleAttrTypes()), false},
+		{"typed schedule set", scheduleObj(&dataFlowScheduleModel{IsEnabled: types.BoolValue(true)}), true},
+		{"unknown counts as unset", types.ObjectUnknown(dataFlowScheduleAttrTypes()), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := baseDataFlowModel()
 			m.Schedule = tc.schedule
-			m.SchedulersJSON = tc.schedJSON
 			if got := scheduleConfigured(m); got != tc.want {
 				t.Errorf("scheduleConfigured() = %v, want %v", got, tc.want)
 			}
@@ -1522,88 +1523,16 @@ func TestScheduleConfigured(t *testing.T) {
 	}
 }
 
-// TestDataFlowApplyScheduleReconciliation proves apply()'s schedulers_json
-// behavior directly, gated purely on the field's OWN null/unknown state
-// going in -- not any external "is this managed" flag. A concrete value
-// (config set it directly) is left untouched. A null or unknown value (config
-// manages neither schedulers_json nor the typed `schedule` block -- Unknown
-// is the real case on every Create/Update plan for an unmanaged Optional+
-// Computed attribute with no plan modifier, not just null) must resolve to
-// a known value by the time apply() returns, so it reflects the live API
-// value -- a real schedule when one exists, and null when the API reports
-// none (not left stale from a prior value).
-//
-// A version of this test that gated on a separate "scheduleManaged" flag
-// (derived from whether config set the typed `schedule` block OR
-// schedulers_json) shipped an apply()-time bug: it left schedulers_json
-// Unknown whenever `schedule` was configured, and Terraform rejected the
-// result with "Provider returned invalid result object after apply" the
-// first time this ran against a real live CDC flow -- reproduced from a
-// real `terraform apply`, not just inferred.
-func TestDataFlowApplyScheduleReconciliation(t *testing.T) {
-	r := &dataFlowResource{}
-	apiWithSchedule := map[string]any{
-		"id": "river1", "name": "flow", "kind": "main_river", "type": "source_to_target",
-		"schedulers": []any{map[string]any{"cron_expression": "0 * * * *", "is_enabled": true}},
-	}
-	apiWithoutSchedule := map[string]any{
-		"id": "river1", "name": "flow", "kind": "main_river", "type": "source_to_target",
-	}
-
-	t.Run("concrete: config value is left untouched", func(t *testing.T) {
-		m := baseDataFlowModel()
-		configValue := `[{"cron_expression":"0 0 * * *","is_enabled":true}]`
-		m.SchedulersJSON = jsontypes.NewNormalizedValue(configValue)
-		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
-			t.Fatalf("unexpected diagnostics: %v", diags)
-		}
-		if m.SchedulersJSON.ValueString() != configValue {
-			t.Errorf("schedulers_json = %q, want config value %q left untouched",
-				m.SchedulersJSON.ValueString(), configValue)
-		}
-	})
-
-	t.Run("unknown (the real Create/Update case for an unmanaged attribute): resolves to the live schedule", func(t *testing.T) {
-		m := baseDataFlowModel()
-		m.SchedulersJSON = jsontypes.NewNormalizedUnknown()
-		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
-			t.Fatalf("unexpected diagnostics: %v", diags)
-		}
-		want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
-		if m.SchedulersJSON.IsUnknown() {
-			t.Fatal("schedulers_json is still unknown -- this is exactly the bug that made a real apply fail")
-		}
-		if m.SchedulersJSON.IsNull() || m.SchedulersJSON.ValueString() != want {
-			t.Errorf("schedulers_json = %v, want %s", m.SchedulersJSON, want)
-		}
-	})
-
-	t.Run("null: reflects a real live schedule", func(t *testing.T) {
-		m := baseDataFlowModel()
-		if diags := r.apply(apiWithSchedule, "env1", &m); diags.HasError() {
-			t.Fatalf("unexpected diagnostics: %v", diags)
-		}
-		want := `[{"cron_expression":"0 * * * *","is_enabled":true}]`
-		if m.SchedulersJSON.IsNull() || m.SchedulersJSON.ValueString() != want {
-			t.Errorf("schedulers_json = %v, want %s", m.SchedulersJSON, want)
-		}
-	})
-
-	t.Run("null: reflects no live schedule as null, not stale", func(t *testing.T) {
-		m := baseDataFlowModel()
-		if diags := r.apply(apiWithoutSchedule, "env1", &m); diags.HasError() {
-			t.Fatalf("unexpected diagnostics: %v", diags)
-		}
-		if !m.SchedulersJSON.IsNull() {
-			t.Errorf("schedulers_json = %v, want null once the API reports no schedule", m.SchedulersJSON)
-		}
-	})
-}
-
-// TestDataFlowApplyScheduleObjectReconciliation is TestDataFlowApplyScheduleReconciliation's
-// counterpart for the typed `schedule` block, proving CORE-2583 AC9's fix: schedule
-// is now reconciled from the live API exactly like schedulers_json, gated purely on
-// its own null/unknown state -- not left as a permanently config-only echo.
+// TestDataFlowApplyScheduleObjectReconciliation proves apply()'s schedule
+// behavior directly, gated purely on the field's OWN null/unknown state going
+// in -- not any external "is this managed" flag. A concrete value (config set
+// it directly) is left untouched. A null or unknown value (config doesn't
+// manage schedule -- Unknown is the real case on every Create/Update plan for
+// an unmanaged Optional+Computed attribute, not just null) must resolve to a
+// known value by the time apply() returns, so it reflects the live API value
+// -- a real schedule when one exists, and null when the API reports none (not
+// left stale from a prior value). This is CORE-2583 AC9's fix: schedule used
+// to be a permanently config-only echo with no way to reflect live drift.
 func TestDataFlowApplyScheduleObjectReconciliation(t *testing.T) {
 	r := &dataFlowResource{}
 	apiWithSchedule := map[string]any{
@@ -1638,7 +1567,7 @@ func TestDataFlowApplyScheduleObjectReconciliation(t *testing.T) {
 			t.Fatalf("unexpected diagnostics: %v", diags)
 		}
 		if m.Schedule.IsUnknown() {
-			t.Fatal("schedule is still unknown -- this is exactly the class of bug schedulers_json already hit")
+			t.Fatal("schedule is still unknown -- Terraform rejects an unknown value in the final state")
 		}
 		if !m.Schedule.Equal(wantScheduleObj) {
 			t.Errorf("schedule = %v, want %v", m.Schedule, wantScheduleObj)
@@ -1767,7 +1696,7 @@ func TestDataFlowUpdateSendsExplicitRemovalOnTransition(t *testing.T) {
 		"type":            tftypes.NewValue(tftypes.String, "source_to_target"),
 		"properties_json": tftypes.NewValue(tftypes.String, batchProps),
 		"settings_json":   tftypes.NewValue(tftypes.String, "{}"),
-		"schedulers_json": tftypes.NewValue(tftypes.String, nil), // just removed from config
+		"schedule":        scheduleTFNull(), // just removed from config
 		"activate":        boolRaw(types.BoolValue(true)),
 		"status":          stringRaw(types.StringValue(riverStatusActive)),
 		"step_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),

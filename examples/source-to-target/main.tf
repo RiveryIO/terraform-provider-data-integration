@@ -64,10 +64,9 @@ resource "boomi_data_integration_data_flow" "mysql_to_postgres" {
     }
   }
 
-  # Typed schedule block (replaces the deprecated schedulers_json). Singular:
-  # the API permits at most one scheduler. Mandatory and must be enabled for CDC
-  # (log-based) flows, where the cron must fire between once per day and 12
-  # times per hour.
+  # Typed schedule block. Singular: the API permits at most one scheduler.
+  # Mandatory and must be enabled for CDC (log-based) flows, where the cron
+  # must fire between once per day and 12 times per hour.
   #
   # schedule = {
   #   cron_expression = "0 * * * *"

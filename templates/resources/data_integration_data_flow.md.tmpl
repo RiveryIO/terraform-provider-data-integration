@@ -47,9 +47,9 @@ Then the cross-cutting contracts:
 
 ## Config-authoritative attributes
 
-`properties_json`, `settings` / `settings_json` and `schedule` / `schedulers_json` are all
-**config-authoritative**: the provider writes them and then keeps your configured value in state
-rather than reading them back from the API. Refresh does not touch them.
+`properties_json` and `settings` / `settings_json` are **config-authoritative**: the provider writes
+them and then keeps your configured value in state rather than reading them back from the API.
+Refresh does not touch them.
 
 This is deliberate. The API enriches these fields on write — `logic_steps` gain `step_id` and
 `is_enabled`, `settings` gains a completed `notification` block — so reconciling them would produce
@@ -62,11 +62,31 @@ Two other consequences worth knowing:
 - The update path is a read-modify-write, so a field you *omit* from `settings` keeps whatever the
   data flow already has on the server; it is not reset.
 - A typed block and its deprecated JSON counterpart write the same API field. Setting both
-  (`settings` + `settings_json`, or `schedule` + `schedulers_json`) is rejected at plan time with an
-  attribute-scoped error rather than one silently winning.
+  `settings` + `settings_json` is rejected at plan time with an attribute-scoped error rather than
+  one silently winning.
+
+`schedule` is different: it is **refreshed on every read**, not config-authoritative. A change made
+in the console shows up as a real plan diff, and applying it restores your configured value — see
+"Scheduling and drift" below.
 
 Everything else — `name`, `kind`, `type`, `description`, `group_id`, `activate`/`status` — is
 reconciled normally on refresh.
+
+## Scheduling and drift
+
+`schedule` mirrors the API's one-item `schedulers` list. Set it, and the provider keeps that exact
+value applied, correcting anything that drifts away from it:
+
+```hcl
+schedule = {
+  cron_expression = "0 */4 * * *" # every four hours
+  is_enabled      = true
+}
+```
+
+Leave it unset and the attribute still reflects whatever schedule actually exists on the flow — so
+`terraform show` tells you the truth even when Terraform isn't managing it — but the provider will
+never remove or overwrite a schedule it was never told to manage.
 
 ## Activation
 

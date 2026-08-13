@@ -62,8 +62,7 @@ The API **refuses to create or enable a CDC data flow that has no enabled schedu
 Please schedule a CDC data flow before enabling or creating
 ```
 
-So a CDC flow must set the typed `schedule` block (or the deprecated `schedulers_json`) with
-`is_enabled = true`:
+So a CDC flow must set the typed `schedule` block with `is_enabled = true`:
 
 ```hcl
 resource "boomi_data_integration_data_flow" "cdc" {

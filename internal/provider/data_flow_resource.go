@@ -48,7 +48,6 @@ type dataFlowModel struct {
 	Settings       *dataFlowSettingsModel `tfsdk:"settings"`
 	SettingsJSON   jsontypes.Normalized   `tfsdk:"settings_json"`
 	Schedule       types.Object           `tfsdk:"schedule"`
-	SchedulersJSON jsontypes.Normalized   `tfsdk:"schedulers_json"`
 	GroupID        types.String           `tfsdk:"group_id"`
 	Activate       types.Bool             `tfsdk:"activate"`
 	Status         types.String           `tfsdk:"status"`
@@ -267,36 +266,34 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"schedule": schema.SingleNestedAttribute{
 				Optional: true,
 				// Computed so an out-of-band schedule change is reflected on refresh
-				// instead of being forced to whatever config last said — the same
-				// reasoning as schedulers_json below, and now using the same
-				// mechanism: dataFlowScheduleModel was migrated to types.Object
-				// specifically so this attribute could safely decode an Unknown
-				// plan value (a raw struct pointer could not — see
-				// dataFlowScheduleModel's doc comment).
+				// instead of being forced to whatever config last said. This needed
+				// dataFlowScheduleModel migrated to types.Object first, since decoding an
+				// Unknown plan value into a raw struct pointer hard-errors — see
+				// dataFlowScheduleModel's doc comment.
 				Computed: true,
-				// UseStateForUnknown, unlike schedulers_json (a flat scalar), is required
-				// here — confirmed live, not assumed. A nested Computed attribute with no
-				// plan modifier plans as Unknown on EVERY plan when config is null, even a
-				// pure refresh with nothing else changing, because its inner attributes
-				// (cron_expression/is_enabled) are Optional-only, not Computed, so the
-				// framework has no way to propose "keep whatever's in state" for the object
-				// as a whole without this modifier — unlike a scalar, which the framework
-				// defaults to reusing from state. Reproduced against a real CDC river
-				// managed via schedulers_json (schedule left unmanaged): every single
-				// `terraform plan` showed schedule -> (known after apply), forever, never
-				// settling to "No changes". This modifier only fires when config is null
-				// (the unmanaged case); it does NOT affect drift detection when config
-				// explicitly sets schedule, since an explicit config value always wins the
-				// plan regardless of state or plan modifiers — verified live both before
-				// and after adding this.
+				// UseStateForUnknown is required here — confirmed live, not assumed. A
+				// nested Computed attribute with no plan modifier plans as Unknown on
+				// EVERY plan when config is null, even a pure refresh with nothing else
+				// changing, because its inner attributes (cron_expression/is_enabled) are
+				// Optional-only, not Computed, so the framework has no way to propose
+				// "keep whatever's in state" for the object as a whole without this
+				// modifier — unlike a flat scalar attribute, which the framework defaults
+				// to reusing from state. Reproduced against a real CDC river with schedule
+				// left unmanaged (before removal, back when schedulers_json still existed
+				// as the alternative): every single `terraform plan` showed
+				// schedule -> (known after apply), forever, never settling to "No
+				// changes". This modifier only fires when config is null (the unmanaged
+				// case); it does NOT affect drift detection when config explicitly sets
+				// schedule, since an explicit config value always wins the plan
+				// regardless of state or plan modifiers — verified live both before and
+				// after adding this.
 				PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
 				Description: "Typed data flow schedule, mirroring one element of the API's top-level " +
-					"\"schedulers\" list. Singular because the API accepts at most one scheduler, and " +
-					"mutually exclusive with the deprecated schedulers_json. Optional for non-CDC " +
-					"flows; required and cron-bounded for CDC (log-based) flows — see the CDC data " +
-					"flows guide. When neither this nor schedulers_json is set, reflects the live API " +
-					"value (if any) so drift is visible; the provider will not remove an existing " +
-					"schedule you never declared.",
+					"\"schedulers\" list. Singular because the API accepts at most one scheduler. " +
+					"Optional for non-CDC flows; required and cron-bounded for CDC (log-based) flows " +
+					"— see the CDC data flows guide. When left unset, reflects the live API value " +
+					"(if any) so drift is visible; the provider will not remove an existing schedule " +
+					"you never declared.",
 				Attributes: map[string]schema.Attribute{
 					"cron_expression": schema.StringAttribute{
 						Optional: true,
@@ -310,31 +307,6 @@ func (r *dataFlowResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 							"API's default. Must be true for CDC (log-based) data flows.",
 					},
 				},
-			},
-			"schedulers_json": schema.StringAttribute{
-				Optional: true,
-				// Computed so an unmanaged schedule (config sets neither schedule nor
-				// schedulers_json) can reflect the live API value instead of being forced to a
-				// fixed null on every plan. Without Computed, apply() writing a live non-null
-				// value here on a plan that said "null" is exactly the "provider produced
-				// inconsistent result after apply" crash this file's history is full of.
-				//
-				// The typed `schedule` block gets the identical treatment (see its own
-				// Computed comment) — both attributes resolve from the live API the same
-				// way in apply(), gated purely on each attribute's own null/unknown state.
-				Computed:   true,
-				CustomType: jsontypes.NormalizedType{},
-				DeprecationMessage: "Use the typed `schedule` block instead — it mirrors the API's " +
-					"RiverSchedule schema and is singular because the API permits at most one " +
-					"scheduler. schedulers_json keeps working for now and is planned for removal in " +
-					"a future major version.",
-				Description: "The data flow schedule as a JSON array, sent top-level as \"schedulers\"; " +
-					"each item is {\"cron_expression\": \"<5-field UNIX cron>\", \"is_enabled\": true}. " +
-					"At most one scheduler is allowed, and CDC (log-based) flows require an enabled one " +
-					"within the platform's cron bounds — see the CDC data flows guide. DEPRECATED in " +
-					"favour of the typed `schedule` block; setting both is a configuration error. When " +
-					"neither this nor `schedule` is set, reflects the live API value (if any) so drift " +
-					"is visible; the provider will not remove an existing schedule you never declared.",
 			},
 			"group_id": schema.StringAttribute{
 				Optional: true,
@@ -495,19 +467,18 @@ func (r *dataFlowResource) Read(ctx context.Context, req resource.ReadRequest, r
 		addAPIError(&resp.Diagnostics, "Error reading data flow", err)
 		return
 	}
-	// Unconditionally reconcile schedulers_json and schedule here, the same way
-	// activate/status are reconciled below regardless of whether they're
-	// config-managed: Read's whole job is making state match reality, not
-	// preserving whatever state already said. Forcing them null right before
-	// apply() guarantees their own null-or-unknown gate treats this as needing
-	// resolution -- if config also sets one of them directly, any resulting
-	// mismatch against the live value is real drift, and the next plan
-	// legitimately reasserts the configured value over it (Optional+Computed:
-	// an explicit config value always wins the plan regardless of refreshed
-	// state) -- not a bug. This is what makes an out-of-band change to a
-	// `schedule`-managed data flow show up as a plan diff instead of being
-	// silently and invisibly overwritten on the next apply.
-	state.SchedulersJSON = jsontypes.NewNormalizedNull()
+	// Unconditionally reconcile schedule here, the same way activate/status are
+	// reconciled below regardless of whether they're config-managed: Read's
+	// whole job is making state match reality, not preserving whatever state
+	// already said. Forcing it null right before apply() guarantees its own
+	// null-or-unknown gate treats this as needing resolution -- if config also
+	// sets it directly, any resulting mismatch against the live value is real
+	// drift, and the next plan legitimately reasserts the configured value
+	// over it (Optional+Computed: an explicit config value always wins the
+	// plan regardless of refreshed state) -- not a bug. This is what makes an
+	// out-of-band change to a `schedule`-managed data flow show up as a plan
+	// diff instead of being silently and invisibly overwritten on the next
+	// apply.
 	state.Schedule = types.ObjectNull(dataFlowScheduleAttrTypes())
 	resp.Diagnostics.Append(r.apply(df, state.EnvironmentID.ValueString(), &state)...)
 
@@ -691,9 +662,9 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	// wasManaged reflects the LAST apply's config, from private state — not
-	// from state.SchedulersJSON, which may itself hold a live-reflected
-	// (rather than config-declared) value from a previous unmanaged apply
-	// (see apply()). scheduleManaged reflects THIS apply's config.
+	// from state.Schedule, which may itself hold a live-reflected (rather
+	// than config-declared) value from a previous unmanaged apply (see
+	// apply()). scheduleManaged reflects THIS apply's config.
 	wasManaged := readScheduleManaged(ctx, req.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -782,8 +753,8 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	//
 	// Before disabling, capture the flow's live scheduler and reinject it
 	// into the PUT body when config doesn't already supply one (via the
-	// typed schedule block or schedulers_json). disable_river's inner
-	// teardown removes the scheduler, and without this the subsequent
+	// typed schedule block). disable_river's inner teardown removes the
+	// scheduler, and without this the subsequent
 	// enable_cdc/activate has to recreate one on its own -- with no
 	// guarantee it matches what the customer actually configured, only that
 	// *some* scheduler ends up present.
@@ -1062,35 +1033,27 @@ func (r *dataFlowResource) buildBody(plan dataFlowModel, stepIDs []string, diags
 	//     round-trips, and that the console Source tab pre-selects the values (not
 	//     "Select..."). A test-connection on the source connection is recommended too.
 	//
-	// The typed `schedule` block wins when present; it renders into the same
-	// single-element list schedulers_json produces, so the CDC path behaves
-	// identically either way. ValidateConfig rejects setting both.
-	switch {
-	case !plan.Schedule.IsNull() && !plan.Schedule.IsUnknown():
+	// The typed `schedule` block renders into a single-element "schedulers"
+	// list when present.
+	if !plan.Schedule.IsNull() && !plan.Schedule.IsUnknown() {
 		body["schedulers"] = []any{dataFlowScheduleBody(dataFlowScheduleFromObject(plan.Schedule))}
-	case !plan.SchedulersJSON.IsNull() && !plan.SchedulersJSON.IsUnknown():
-		schedulers, ok := decodeJSONArray(plan.SchedulersJSON, path.Root("schedulers_json"), diags)
-		if !ok {
-			return nil, false
-		}
-		body["schedulers"] = schedulers
 	}
 	return body, true
 }
 
 // scheduleManagedPrivateKey stores whether the last successful apply's config
-// declared a schedule (schedule or schedulers_json), independent of what
-// Terraform state itself holds for that field.
+// declared a schedule, independent of what Terraform state itself holds for
+// that field.
 //
-// This can't be derived from state alone once schedulers_json reflects the
-// live API value for unmanaged flows (see apply()): both "config never
-// declared a schedule" and "config used to declare one and just removed it"
-// end up as the same null-in-config, and after a live-value refresh, state
-// no longer preserves which case it was. Private state is the one place that
-// survives independent of both config and the live-reflected value, so
-// Update can tell a genuine removal (was managed, now isn't -- send an
-// explicit clear) apart from a flow that simply never opted in (leave the
-// live schedule alone).
+// This can't be derived from state alone once schedule reflects the live API
+// value for unmanaged flows (see apply()): both "config never declared a
+// schedule" and "config used to declare one and just removed it" end up as
+// the same null-in-config, and after a live-value refresh, state no longer
+// preserves which case it was. Private state is the one place that survives
+// independent of both config and the live-reflected value, so Update can
+// tell a genuine removal (was managed, now isn't -- send an explicit clear)
+// apart from a flow that simply never opted in (leave the live schedule
+// alone).
 const scheduleManagedPrivateKey = "schedule_managed"
 
 // privateStateReader and privateStateWriter mirror the method sets of
@@ -1157,24 +1120,21 @@ func scheduleRemovalNeeded(wasManaged, scheduleManaged bool) bool {
 	return wasManaged && !scheduleManaged
 }
 
-// scheduleConfigured reports whether config declares a schedule via either
-// representation — the typed `schedule` block or the deprecated
-// schedulers_json string. ValidateConfig already rejects setting both.
+// scheduleConfigured reports whether config declares a schedule via the
+// typed `schedule` block.
 //
-// Both fields are Optional+Computed with no plan modifier, so on a plan
-// where config declares neither, BOTH read as Unknown here, not Null — the
-// same reasoning documented on TestDataFlowApplyScheduleReconciliation.
-// Excluding Unknown (not just Null) is what keeps this reporting "not
-// configured" correctly in that case, exactly as it already did for
-// schedulers_json before this function grew a second field to check.
+// schedule is Optional+Computed with no state-preserving plan modifier for
+// its "declared" status, so on a plan where config declares nothing, it
+// reads as Unknown here, not Null — the same reasoning documented on
+// TestDataFlowApplyScheduleReconciliation. Excluding Unknown (not just Null)
+// is what keeps this reporting "not configured" correctly in that case.
 func scheduleConfigured(m dataFlowModel) bool {
-	return (!m.Schedule.IsNull() && !m.Schedule.IsUnknown()) ||
-		(!m.SchedulersJSON.IsNull() && !m.SchedulersJSON.IsUnknown())
+	return !m.Schedule.IsNull() && !m.Schedule.IsUnknown()
 }
 
 // ensureSchedulersInBody makes sure body carries the data flow's current live
 // scheduler when config doesn't already supply one (via the typed schedule
-// block or schedulers_json). Used both when a PUT switches a flow into CDC
+// block). Used both when a PUT switches a flow into CDC
 // (the API validator requires a scheduler present) and before a PUT that
 // disables CDC to unlock a properties change (so the disable/enable-CDC
 // round trip re-asserts the original schedule explicitly instead of relying
@@ -1221,9 +1181,10 @@ func dataFlowNotificationReportAttributes() map[string]schema.Attribute {
 }
 
 // ValidateConfig rejects configurations that set a typed block and its
-// deprecated JSON counterpart at the same time. Doing this at validate time
-// (rather than picking a winner in buildBody) means the conflict surfaces as a
-// plan-time error with an attribute path, not as a silently ignored setting.
+// deprecated JSON counterpart (settings_json) at the same time. Doing this at
+// validate time (rather than picking a winner in buildBody) means the
+// conflict surfaces as a plan-time error with an attribute path, not as a
+// silently ignored setting.
 func (r *dataFlowResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var cfg dataFlowModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
@@ -1239,9 +1200,9 @@ func (r *dataFlowResource) ValidateConfig(ctx context.Context, req resource.Vali
 // scheduler before the API will let them run at all. Every other run type
 // (all, incremental, change_tracking, system_versioning) can be created and
 // left unscheduled indefinitely — this check is deliberately scoped to
-// isCDCFlow, not a blanket requirement on the schema itself (schedule/
-// schedulers_json stay Optional for every flow type; only CDC additionally
-// requires one, and only CDC gets told so here).
+// isCDCFlow, not a blanket requirement on the schema itself (schedule stays
+// Optional for every flow type; only CDC additionally requires one, and
+// only CDC gets told so here).
 //
 // Enforced here rather than left to the API's own rejection so the error
 // surfaces at plan time with an attribute path, not as an opaque 4xx deep
@@ -1251,12 +1212,12 @@ func validateDataFlowScheduleRequiredForCDC(cfg dataFlowModel) diag.Diagnostics 
 	if !isCDCFlow(cfg.PropertiesJSON.ValueString()) {
 		return diags
 	}
-	if cfg.Schedule.IsNull() && cfg.SchedulersJSON.IsNull() {
+	if cfg.Schedule.IsNull() {
 		diags.AddAttributeError(path.Root("schedule"),
 			"CDC (log-based) data flows require a schedule",
-			"Set the typed `schedule` block (or the deprecated `schedulers_json`) — the API "+
-				"requires an enabled scheduler before it will enable and run change-data-capture "+
-				"streaming. Every other run type may be created and left unscheduled.")
+			"Set the typed `schedule` block — the API requires an enabled scheduler before it "+
+				"will enable and run change-data-capture streaming. Every other run type may be "+
+				"created and left unscheduled.")
 	}
 	return diags
 }
@@ -1275,14 +1236,6 @@ func validateDataFlowExclusivity(cfg dataFlowModel) diag.Diagnostics {
 			"Set either the typed `settings` block or the deprecated `settings_json` string, "+
 				"not both. They write the same API field, so the provider will not guess which "+
 				"one you meant. Prefer `settings`; `settings_json` is deprecated.")
-	}
-	if !cfg.Schedule.IsNull() && !cfg.SchedulersJSON.IsNull() {
-		diags.AddAttributeError(path.Root("schedule"),
-			"Conflicting configuration: schedule and schedulers_json",
-			"Set either the typed `schedule` block or the deprecated `schedulers_json` string, "+
-				"not both. They write the same API field (top-level \"schedulers\"), so the "+
-				"provider will not guess which one you meant. Prefer `schedule`; "+
-				"`schedulers_json` is deprecated.")
 	}
 	return diags
 }
@@ -1431,33 +1384,21 @@ func (r *dataFlowResource) apply(api map[string]any, envID string, m *dataFlowMo
 			m.SettingsJSON = jsontypes.NewNormalizedValue("{}")
 		}
 	}
-	// schedulers_json and schedule are both Optional+Computed. If config set
-	// one of them directly, it's already concrete going into apply() (config
-	// wins — buildBody sent that same value in the PUT, and the API's
-	// response mirrors it back anyway, so there's nothing to reconcile).
-	// Otherwise it's null (state) or unknown (a plan where config manages
-	// neither representation) — either way it must resolve to a known value
-	// by the time this function returns, a Computed attribute's contract, so
-	// reflect the live scheduler into it unconditionally whenever that's
-	// true. This runs on every call, not gated by whether it was already
-	// null, so a schedule changed out of band (console, another tool) keeps
-	// showing up on every refresh, not just the first one — for whichever
-	// representation config didn't already pin down.
+	// schedule is Optional+Computed. If config set it directly, it's already
+	// concrete going into apply() (config wins — buildBody sent that same
+	// value in the PUT, and the API's response mirrors it back anyway, so
+	// there's nothing to reconcile). Otherwise it's null (state) or unknown
+	// (a plan where config doesn't manage it) — either way it must resolve
+	// to a known value by the time this function returns, a Computed
+	// attribute's contract, so reflect the live scheduler into it
+	// unconditionally whenever that's true. This runs on every call, not
+	// gated by whether it was already null, so a schedule changed out of
+	// band (console, another tool) keeps showing up on every refresh, not
+	// just the first one.
 	//
 	// This never fights ensureSchedulersInBody's live scheduler preservation
 	// during a disable/re-enable-CDC round trip: that's about what's sent to
 	// the API, this is purely about what Terraform reports afterward.
-	if m.SchedulersJSON.IsNull() || m.SchedulersJSON.IsUnknown() {
-		if schedulers, ok := api["schedulers"].([]any); ok && len(schedulers) > 0 {
-			if raw, err := json.Marshal(schedulers); err == nil {
-				m.SchedulersJSON = jsontypes.NewNormalizedValue(string(raw))
-			} else {
-				diags.AddError("Error encoding schedulers", err.Error())
-			}
-		} else {
-			m.SchedulersJSON = jsontypes.NewNormalizedNull()
-		}
-	}
 	if m.Schedule.IsNull() || m.Schedule.IsUnknown() {
 		m.Schedule = dataFlowScheduleFromAPI(api)
 	}
@@ -1474,18 +1415,6 @@ func decodeJSONObject(v jsontypes.Normalized, attrPath path.Path, diags *diag.Di
 		return nil, false
 	}
 	return obj, true
-}
-
-// decodeJSONArray parses a Normalized JSON string into a slice, appending a
-// diagnostic at attrPath when it is not a JSON array.
-func decodeJSONArray(v jsontypes.Normalized, attrPath path.Path, diags *diag.Diagnostics) ([]any, bool) {
-	var arr []any
-	if err := json.Unmarshal([]byte(v.ValueString()), &arr); err != nil {
-		diags.AddAttributeError(attrPath, "Invalid JSON array",
-			fmt.Sprintf("%s must be a JSON array: %s", attrPath, err))
-		return nil, false
-	}
-	return arr, true
 }
 
 // ── step_id helpers ───────────────────────────────────────────────────────────

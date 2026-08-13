@@ -175,12 +175,13 @@ each run, which throws away exactly the history the increment is accumulating.
 
 ## Scheduling and activation
 
-- **`schedulers_json`** is what this example uses, because it is what the released
-  `v1.1.0` has. A **typed `schedule` block** (`cron_expression` + `is_enabled`)
-  has landed on this repo's `main` and deprecates `schedulers_json`, but it is not
-  in `v1.1.0` — switch once the next version ships. Same story for the typed
-  `settings` block vs `settings_json`. Exactly one scheduler is allowed, and the
-  cron must fire between once per day and 12 times per hour.
+- **`schedule`** is a typed block (`cron_expression` + `is_enabled`). Exactly one
+  scheduler is allowed, and the cron must fire between once per day and 12 times
+  per hour.
+- **`settings_json`** is what this example uses for settings, because it is what
+  the released `v1.1.0` has. A **typed `settings` block** (`run_timeout_seconds` +
+  `notification`) has landed on this repo's `main` and deprecates `settings_json`,
+  but it is not in `v1.1.0` — switch once the next version ships.
 - **`activate`** is passed explicitly. On the released `v1.1.0` it defaults to
   `false`. On `main` the default has been **removed**: omitting it means
   activation is unmanaged (the provider adopts whatever the server reports and

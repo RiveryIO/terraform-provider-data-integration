@@ -51,7 +51,7 @@ func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest
 	resp.Schema = schema.Schema{
 		DeprecationMessage: "boomi_data_integration_data_flow_run is deprecated and will be removed in a " +
 			"future major version: Terraform manages desired state, it does not run flows. Trigger runs " +
-			"from the data flow's own schedule (schedulers_json on boomi_data_integration_data_flow, or " +
+			"from the data flow's own schedule (schedule on boomi_data_integration_data_flow, or " +
 			"the platform scheduler) or with a direct API call from your orchestrator or CI pipeline.",
 		Description: "**Deprecated — will be removed in a future major version.** " +
 			"Triggers a run of a data flow on apply — a way to execute the underlying " +
@@ -68,7 +68,7 @@ func (r *dataFlowRunResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"rather than real Terraform state. Keeping it invites plans that appear to converge while " +
 			"silently firing side effects.\n\n" +
 			"Instead, run data flows the way the platform intends: define the schedule on the flow " +
-			"itself via `schedulers_json` on `boomi_data_integration_data_flow` (or the platform " +
+			"itself via `schedule` on `boomi_data_integration_data_flow` (or the platform " +
 			"scheduler UI) so the platform owns the timing, or call the run API directly from " +
 			"whatever orchestrator or CI pipeline needs the run at a specific point in its own " +
 			"workflow. Activation — the one operation that is genuinely part of a data flow's " +

@@ -28,17 +28,17 @@ That leaves two supported ways to actually run a flow.
 ## Option 1 — let the platform schedule it
 
 The right answer for anything recurring. Define the schedule on the flow via
-`schedulers_json`, and the platform owns the timing:
+`schedule`, and the platform owns the timing:
 
 ```hcl
 resource "boomi_data_integration_data_flow" "orders" {
   # ...
   activate = true
 
-  schedulers_json = jsonencode([{
-    is_active = true
-    cron_exp  = "0 */4 * * *" # every four hours
-  }])
+  schedule = {
+    cron_expression = "0 */4 * * *" # every four hours
+    is_enabled      = true
+  }
 }
 ```
 
