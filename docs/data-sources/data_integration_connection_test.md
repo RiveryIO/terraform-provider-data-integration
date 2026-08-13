@@ -4,7 +4,7 @@ subcategory: "Connections"
 description: |-
   Tests whether an existing connection can actually reach its source/target and authenticate, by having the platform open a real connection to it and read metadata (a get_db_metadata/get_schemas "pull request"). The API has no dedicated test-connection route; this reproduces what the console's "Test Connection" button does. The read does NOT fail when the connection is unreachable — instead success is false and error_message carries the real connector error (e.g. an ORA-* code). Assert on success in a lifecycle precondition/check block if you want a bad connection to fail the plan.
   task_type defaults to "source" — this tests whether the connection can be PULLED FROM, not whether it can be pushed to. For a data-warehouse connection used as a data flow's TARGET (Snowflake, BigQuery, Databricks), that default is the wrong check: the API rejects a warehouse tested as a source with a 400 "The connection does not match to the provided connection_type" — and because that is a hard error, not success = false, a postcondition on self.success never even runs; error_message is left empty and the actual failure surfaces as a provider error instead. Use boomi_data_integration_target_metadata to check a warehouse target instead — it issues the correct task_type = "target" request and doubles as reachability plus a live list of its databases/datasets/catalogs. If you do set task_type = "target" here directly, only the warehouse's own listing verb is accepted (e.g. get_databases for Snowflake); get_db_metadata is rejected with a 422 "did not match any key in the pull-translate mapping for this datasource_id".
-  This test is a live network call and it competes for platform workers. A test that completes in ~35s on its own can sit at operation status "R" past the 180s default when Terraform reads it concurrently with other live data sources, which it does by default. A timeout here is a hard provider error, not success = false, so a postcondition cannot catch it — raise timeout_seconds, run with -parallelism=1, or prefer boomi_data_integration_source_metadata, which proves the same connection AND returns the schema mapping the data flow needs, replacing this test rather than adding to it.
+  This test is a live network call and it competes for platform workers. A test that completes in ~35s on its own can sit at operation status "R" past the 180s default when Terraform reads it concurrently with other live data sources, which it does by default. A timeout here now surfaces as success = false (status stays "R", error_message carries the timeout detail) plus a warning diagnostic — not a hard provider error — so a postcondition on self.success DOES catch it. Mitigations, best first: keep timeout_seconds SMALL so an inconclusive gate fails fast; stage the apply so gates do not front-run the work (apply the connections, then the data flow, then let the gates read); and only then consider -parallelism=1. Do NOT combine a raised timeout_seconds with -parallelism=1: serialising the reads makes their timeouts SUM, and they sum in front of resource creation — two gates at 600s and 5m become a 15-minute prologue ahead of a data flow that takes ~60s to create. boomi_data_integration_source_metadata is an alternative that proves the same connection AND returns the schema mapping the data flow needs, replacing this test rather than adding to it — but note it issues one live request per requested table, serially, so for a multi-table flow it is not cheaper.
 ---
 
 # Test a connection
@@ -85,14 +85,35 @@ few seconds to `timeout_seconds` (default 180).
 sources in parallel, and these tests compete for the same platform workers. A
 test that finishes in ~35s on its own has been observed sitting at operation
 status `"R"` past the 180s default when read alongside another live data
-source. A timeout is a hard provider error, not `success = false`, so a
-`postcondition` on `self.success` cannot catch it. Mitigations, best first:
+source. A timeout now surfaces as `success = false` (status stays `"R"`,
+`error_message` carries the timeout detail) plus a warning diagnostic — **not**
+a hard provider error — so a `postcondition` on `self.success` does catch it.
+Mitigations, best first:
 
 - Prefer `boomi_data_integration_source_metadata` for an RDBMS source — it
   proves the same connection **and** returns the `schemas[]` mapping the data
   flow needs, so it replaces this test rather than adding a second round trip.
 - Raise `timeout_seconds`.
 - Run with `-parallelism=1`.
+
+~> **Don't combine "raise `timeout_seconds`" with `-parallelism=1`.**
+Serializing reads makes every gate's timeout run one after another instead of
+concurrently, and they run *before* Terraform starts creating anything —
+`-parallelism=1` doesn't just slow the gates down, it makes their timeouts
+**sum, in front of the real work**. Observed: two gates configured for 600s
+and 5m became a 15-minute prologue ahead of a data flow that itself takes 62
+seconds to create — 10 minutes of a 26-minute run lost to gates that were
+never going to succeed. If you need `-parallelism=1` for other reasons, prefer
+**small** `timeout_seconds` values instead of large ones: a fast, cheap
+failure is the worst case you want, not a slow one. Better still, stage the
+apply so the gates don't front-run the work they're gating:
+
+```bash
+terraform apply -target=boomi_data_integration_connection.mysql_source \
+                 -target=boomi_data_integration_connection.snowflake_target   # connections
+terraform apply -target=boomi_data_integration_data_flow.orders              # the work
+terraform apply                                                              # then the gates
+```
 
 **When it runs matters.** For a connection Terraform is about to *create*, the
 `connection_id` isn't known until apply, so the test is deferred to apply, as
@@ -128,7 +149,7 @@ live connection attempt per `connection_test` in the configuration.
 - `inputs_json` (String) Optional extra pull_request_inputs fields as a JSON object, merged into the request (e.g. {"database_name":"MYDB"} for Snowflake, or {"schemas":["DEV"]}). connection_id and pull_request_type are always set by the provider.
 - `task` (String) The pull-request operation that opens the connection. Defaults to "get_db_metadata". Other reachability tasks: "get_schemas", "get_databases".
 - `task_type` (String) Whether the connection is used as a "source" (default) or "target". Get this wrong for a data-warehouse connection (Snowflake/BigQuery/Databricks) and the API returns a hard 400 error rather than `success = false` — see the data source description for why `boomi_data_integration_target_metadata` is the right tool for a warehouse target instead.
-- `timeout_seconds` (Number) How long to wait for the test to finish before erroring. Default 180.
+- `timeout_seconds` (Number) How long to wait for the test to finish before giving up. Default 180. On expiry the read does NOT error: it returns `success = false` (status stays "R") plus a warning diagnostic, so a `postcondition` on `self.success` still catches it.
 
 ### Read-Only
 
