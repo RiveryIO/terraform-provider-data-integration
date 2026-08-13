@@ -175,12 +175,14 @@ Databases that aren't publicly routable — or that only allow a bastion host �
 are reached through an SSH tunnel. This is configured entirely inside
 `parameters_json`, plus the private key as a file upload.
 
-!> **The tunnel fields are not listed by
-`GET /v1/connections_types/{type}`, and therefore not by the
-`boomi_data_integration_connection_type` data source either.** Everywhere else
-in this guide that catalog is authoritative for what `parameters_json` accepts.
-For the SSH-tunnel path it is not — the fields below are real and accepted, but
-you cannot discover them from it. This section is the reference.
+!> **Most tunnel fields are not listed by `GET /v1/connections_types/{type}`,
+and therefore not by the `boomi_data_integration_connection_type` data source
+either.** The catalog lists `ssh_remote_host` but omits `is_ssh_tunnel`,
+`ssh_remote_port`, `ssh_remote_user` and `ssh_pkey_file_path`. (The catalog's
+own `key_file_path` for `mysql` is unrelated — that's the CA-certificate
+field, not a tunnel key.) Everywhere else in this guide that catalog is
+authoritative for what `parameters_json` accepts; for the SSH-tunnel path it
+is incomplete. This section is the reference.
 
 ```hcl
 resource "boomi_data_integration_connection" "mysql_tunneled" {
