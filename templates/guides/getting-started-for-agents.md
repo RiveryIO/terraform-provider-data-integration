@@ -127,15 +127,27 @@ From inside Terraform, the same check is available without leaving your
 configuration:
 
 - [`boomi_data_integration_connection_type`](../data-sources/data_integration_connection_type.md)
-  — the property schema for one type.
+  — one type's property schema, read from `GET /v1/connections_types/{type}`.
 - [`boomi_data_integration_connection_types`](../data-sources/data_integration_connection_types.md)
-  — the catalog of all types.
+  — the catalog of all types, read from the `GET /v1/connections_types` listing.
 
--> **The SSH-tunnel fields are the documented exception.** `is_ssh_tunnel`,
-`ssh_remote_host`, `ssh_remote_port`, and `ssh_remote_user` are real and
-accepted, but the type catalog does not list them — so for the tunnel path the
-[Connections](./connections.md#reaching-a-database-through-an-ssh-tunnel) guide
-is authoritative, not the API. This is the only place that inversion applies.
+!> **The two endpoints disagree, and the singular one under-reports.** Measured
+live on 2026-08-13: the per-type endpoint returns a strict subset of the listing
+for every type checked — `mysql` 10 properties against 18, `mssql` 13 against
+22, `snowflake` 10 against 23, `postgres` 12 against 28, `jira` 7 against 12.
+Nothing appeared in a per-type response that the listing lacked. What the
+per-type endpoint drops is not trivia: the whole SSH-tunnel field set
+(`is_ssh_tunnel`, `ssh_remote_user`, `ssh_remote_port`, `ssh_remote_password`,
+`ssh_pkey_file_path`, `ssh_pkey_file_pwd`, `ssh_auto_generate`), the file-zone
+staging fields (`default_bucket`, `region`, `aws_access_key`,
+`aws_access_secret`, `custom_fz`, `fz_connection_id`), and `connection_name`.
+
+So **use the plural data source when you need a complete field list**, and treat
+a field's absence from the singular one as inconclusive rather than proof. Note
+this corrects an earlier claim in these guides that the tunnel fields were a
+documented catalog gap where the Connections guide outranked the API. They are
+not a gap — they are in the listing. The API remains authoritative throughout;
+the only question is which endpoint you asked.
 
 When two sources conflict, **say which one you followed** in your output. Do not
 resolve it silently — a conflict is a defect report for whichever source is

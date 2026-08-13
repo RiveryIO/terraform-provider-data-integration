@@ -223,12 +223,25 @@ Databases that aren't publicly routable — or that only allow a bastion host �
 are reached through an SSH tunnel. This is configured entirely inside
 `parameters_json`, plus the private key as a file upload.
 
-!> **The tunnel fields are not listed by
-`GET /v1/connections_types/{type}`, and therefore not by the
-`boomi_data_integration_connection_type` data source either.** Everywhere else
-in this guide that catalog is authoritative for what `parameters_json` accepts.
-For the SSH-tunnel path it is not — the fields below are real and accepted, but
-you cannot discover them from it. This section is the reference.
+!> **The tunnel fields are missing from `GET /v1/connections_types/{type}`, and
+therefore from the `boomi_data_integration_connection_type` data source — but
+they ARE in the catalog listing.** `GET /v1/connections_types` returns
+`is_ssh_tunnel`, `ssh_remote_host`, `ssh_remote_user`, `ssh_remote_port`,
+`ssh_remote_password`, `ssh_pkey_file_path`, `ssh_pkey_file_pwd` and
+`ssh_auto_generate` for `mysql`. So there is no catalog gap here and no
+exception to the rule that the API is authoritative — just two endpoints, one of
+which under-reports.
+
+-> **The per-type endpoint is a strict subset of the listing, for every type
+checked.** Measured live on 2026-08-13: `mysql` returns 10 properties per type
+against 18 in the listing, `mssql` 13 against 22, `snowflake` 10 against 23,
+`postgres` 12 against 28, `jira` 7 against 12. Nothing appeared in a per-type
+response that was absent from the listing. Beyond the tunnel fields, the
+per-type response also omits the file-zone staging fields (`default_bucket`,
+`region`, `aws_access_key`, `aws_access_secret`, `custom_fz`,
+`fz_connection_id`) and `connection_name`. Prefer
+`boomi_data_integration_connection_types` (plural) when you need a complete
+field list; the singular data source still reads the per-type endpoint.
 
 ```hcl
 resource "boomi_data_integration_connection" "mysql_tunneled" {
