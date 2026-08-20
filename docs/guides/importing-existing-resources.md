@@ -57,6 +57,22 @@ This is a known rough edge in Terraform's config generation feature — it uses 
 
 ---
 
+## MSSQL change tracking
+
+SQL Server's built-in [Change Tracking](https://learn.microsoft.com/en-us/sql/relational-databases/track-changes/about-change-tracking-sql-server) feature records which rows changed since a given version number, without requiring a reliable `updated_at` column or access to the transaction log.
+
+| Decision | Value |
+| --- | --- |
+| `extract_method` | `change_tracking` |
+| `run_type` | `multi_tables` |
+| `loading_method` | `merge` |
+
+**How it differs from CDC:** CDC (`extract_method = "log"`) reads the SQL Server transaction log and requires a mandatory enabled scheduler firing every 5 minutes to once a day. Change tracking reads a version-tracked change table instead — simpler to set up, lower overhead, but captures *what* changed rather than a full before/after event stream. Use change tracking when you need efficient incremental sync without the operational overhead of log-based CDC.
+
+**How it differs from incremental:** Incremental extraction (`extract_method = "incremental"`) relies on a watermark column (`updated_at`, `modified_at`) being maintained by the application. Change tracking works at the SQL Server engine level — no watermark column needed, and deletes are captured.
+
+---
+
 ## Step-by-step example
 
 ### 1. Configure the provider
