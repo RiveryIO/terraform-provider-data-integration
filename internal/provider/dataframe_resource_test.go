@@ -25,20 +25,6 @@ func dataFrameSchemaForTest(t *testing.T) schema.Schema {
 	return resp.Schema
 }
 
-// dataFramePlanGet decodes a raw tftypes plan into dataFrameModel using the
-// framework's own Plan.Get — the exact call path that crashed before this fix.
-// No client, no HTTP, no API: this is a pure in-process framework decode.
-func dataFramePlanGet(t *testing.T, s schema.Schema, raw tftypes.Value) (dataFrameModel, bool) {
-	t.Helper()
-	plan := tfsdk.Plan{Raw: raw, Schema: s}
-	var m dataFrameModel
-	diags := plan.Get(context.Background(), &m)
-	if diags.HasError() {
-		return dataFrameModel{}, false
-	}
-	return m, true
-}
-
 // dataFrameStaticPlan builds a tftypes.Value from a minimal set of overrides,
 // with every other attribute set to null. The connection_settings key must be
 // supplied as a tftypes.Value (use tftypes.NewValue(csType, nil) for null).
