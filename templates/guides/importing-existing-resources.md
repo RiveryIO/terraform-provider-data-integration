@@ -141,7 +141,4 @@ terraform plan
 
 ## Notes
 
-- **`properties_json` is required** for `boomi_data_integration_data_flow`. Unlike connections, data flows cannot use a minimal stub — the provider schema marks this field as required. `-generate-config-out` is the recommended way to populate it without hand-writing the JSON.
-- **Connections omit `parameters_json`** in the generated output (it is marked `sensitive` / write-only). This is correct — Terraform tracks the connection in state without storing credentials.
 - **Import blocks are one-shot** — once a resource is in state, remove the `import {}` block. Leaving it causes a warning on subsequent plans.
-- **Renaming a resource** after import does not recreate it — use `terraform state mv` to rename the state entry to match the new HCL name.
