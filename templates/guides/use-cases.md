@@ -21,8 +21,8 @@ For complete, runnable configurations see [Examples](./examples.md).
 | [Ad platforms to warehouse](#2-ad-platforms-to-warehouse-marketing-ops) | Facebook/Google/TikTok/LinkedIn Ads | BigQuery / Snowflake | `predefined_report` | rolling `date_range` | `merge` |
 | [Salesforce to warehouse](#3-salesforce-to-warehouse-revops-and-pipeline-reporting) | Salesforce | Snowflake | `regular` | `incremental` | `merge` |
 | [Custom REST API to warehouse](#4-custom-rest-api-to-warehouse-bespoke-integrations) | Internal/partner REST API | Snowflake | `regular` | varies | `append` or `merge` |
-| [MSSQL change tracking](#5-mssql-change-tracking) | MSSQL | Snowflake | `multi_tables` | `change_tracking` | `merge` |
-| [Near-real-time replication](#6-near-real-time-replication-cdc) | MySQL / MSSQL / Postgres / MongoDB | Snowflake | `multi_tables` | `log` (CDC) | `merge` |
+| [Near-real-time replication](#5-near-real-time-replication-cdc) | MySQL / MSSQL / Postgres / MongoDB | Snowflake | `multi_tables` | `log` (CDC) | `merge` |
+| [MSSQL change tracking](#6-mssql-change-tracking) | MSSQL | Snowflake | `multi_tables` | `change_tracking` | `merge` |
 
 ## 1. Operational database to warehouse (BI and analytics engineering)
 
@@ -145,7 +145,7 @@ window, an endpoint path), that's the signal to parameterize it once as a
 **Read next:** [API connector data flows](./api-connector-data-flows.md), [API connector required
 settings](./api-connectors.md), [Blueprint data flows](./blueprint-data-flows.md).
 
-## 5. MSSQL change tracking
+## 6. MSSQL change tracking
 
 **What you're building:** an incremental sync of MSSQL tables that captures inserts, updates, and deletes without relying on an `updated_at` column or reading the transaction log.
 
@@ -185,7 +185,7 @@ schemas = [{
 
 **Read next:** [Database data flows](./database-data-flows.md), [Loading methods](./loading-methods.md).
 
-## 6. Near-real-time replication (CDC)
+## 5. Near-real-time replication (CDC)
 
 **What you're building:** a warehouse copy that stays minutes-fresh instead of waiting for the next
 batch run — reading the source's change log instead of re-querying tables.
@@ -206,7 +206,7 @@ Full runnable configs: [`examples/mongodb-cdc-to-snowflake`](https://github.com/
 
 ## Other common pairs
 
-These reuse one of the five patterns above — the table just points at which one.
+These reuse one of the six patterns above — the table just points at which one.
 
 | Source → target | Reuses |
 | --- | --- |
