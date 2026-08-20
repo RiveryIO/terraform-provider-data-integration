@@ -136,9 +136,3 @@ Terraform imports the resources into state and applies any diff between the gene
 terraform plan
 # No changes. Your infrastructure matches the configuration.
 ```
-
----
-
-## Notes
-
-- **Import blocks are one-shot** — once a resource is in state, remove the `import {}` block. Leaving it causes a warning on subsequent plans.
