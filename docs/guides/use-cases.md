@@ -183,7 +183,7 @@ schemas = [{
 }]
 ```
 
-**Read next:** [Database data flows](./database-data-flows.md), [Loading methods](./loading-methods.md), [Importing existing resources](./importing-existing-resources.md).
+**Read next:** [Database data flows](./database-data-flows.md), [Loading methods](./loading-methods.md).
 
 ## 6. Near-real-time replication (CDC)
 
