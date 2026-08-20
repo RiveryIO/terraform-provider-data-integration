@@ -21,7 +21,8 @@ For complete, runnable configurations see [Examples](./examples.md).
 | [Ad platforms to warehouse](#2-ad-platforms-to-warehouse-marketing-ops) | Facebook/Google/TikTok/LinkedIn Ads | BigQuery / Snowflake | `predefined_report` | rolling `date_range` | `merge` |
 | [Salesforce to warehouse](#3-salesforce-to-warehouse-revops-and-pipeline-reporting) | Salesforce | Snowflake | `regular` | `incremental` | `merge` |
 | [Custom REST API to warehouse](#4-custom-rest-api-to-warehouse-bespoke-integrations) | Internal/partner REST API | Snowflake | `regular` | varies | `append` or `merge` |
-| [Near-real-time replication](#5-near-real-time-replication-cdc) | MySQL / MSSQL / Postgres / MongoDB | Snowflake | `multi_tables` | `log` (CDC) | `merge` |
+| [MSSQL change tracking](#5-mssql-change-tracking) | MSSQL | Snowflake | `multi_tables` | `change_tracking` | `merge` |
+| [Near-real-time replication](#6-near-real-time-replication-cdc) | MySQL / MSSQL / Postgres / MongoDB | Snowflake | `multi_tables` | `log` (CDC) | `merge` |
 
 ## 1. Operational database to warehouse (BI and analytics engineering)
 
@@ -144,7 +145,47 @@ window, an endpoint path), that's the signal to parameterize it once as a
 **Read next:** [API connector data flows](./api-connector-data-flows.md), [API connector required
 settings](./api-connectors.md), [Blueprint data flows](./blueprint-data-flows.md).
 
-## 5. Near-real-time replication (CDC)
+## 5. MSSQL change tracking
+
+**What you're building:** an incremental sync of MSSQL tables that captures inserts, updates, and deletes without relying on an `updated_at` column or reading the transaction log.
+
+**The provider shape:** `run_type = "multi_tables"`, `extract_method = "change_tracking"` per table, `loading_method = "merge"`. SQL Server maintains a version-tracked change table at the engine level — the data flow reads which row IDs changed since the last sync version and fetches only those rows.
+
+**How it differs from incremental:** Incremental extraction (`extract_method = "incremental"`) requires the application to maintain a watermark column. Change tracking works at the SQL Server engine level — no watermark column needed, and row deletes are captured.
+
+**How it differs from CDC:** CDC (`extract_method = "log"`) reads the SQL Server transaction log, captures a full before/after event stream, and requires a mandatory enabled scheduler firing between every 5 minutes and once a day. Change tracking reads a lighter change table — lower overhead, simpler setup, but only records *that* a row changed (not the full event history).
+
+**Sketch:**
+
+```hcl
+source = {
+  name          = "mssql"
+  run_type      = "multi_tables"
+  connection_id = boomi_data_integration_connection.mssql.id
+}
+target = {
+  name           = "snowflake"
+  connection_id  = boomi_data_integration_connection.wh.id
+  loading_method = "merge"
+  merge_method   = "merge"
+}
+schemas = [{
+  name = "<YOUR_SCHEMA>"
+  tables = [{
+    run_type_and_datasource = "multi_tables"
+    details = {
+      name           = "<YOUR_TABLE>"
+      target_table   = "<YOUR_TABLE>"
+      is_selected    = true
+      extract_method = "change_tracking"
+    }
+  }]
+}]
+```
+
+**Read next:** [Database data flows](./database-data-flows.md), [Loading methods](./loading-methods.md), [Importing existing resources](./importing-existing-resources.md).
+
+## 6. Near-real-time replication (CDC)
 
 **What you're building:** a warehouse copy that stays minutes-fresh instead of waiting for the next
 batch run — reading the source's change log instead of re-querying tables.
