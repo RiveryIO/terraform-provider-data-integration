@@ -1,0 +1,21 @@
+templates/guides/importing-existing-resources.md
+  s_f74602e8181332::t_48fee76cdc964e 60-75
+docs/guides/importing-existing-resources.md
+  s_f74602e8181332::t_d91609d305f339 60-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "d952526d5f2919f5225f94f8d6ffd722148c189a",
+  "prompts": {},
+  "sessions": {
+    "s_f74602e8181332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92c60ddd-29ce-4ff0-9cfb-c5fdefd59c4e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
