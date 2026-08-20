@@ -118,6 +118,63 @@ terraform plan -generate-config-out=generated.tf && sed -i '' '/provider *= *dat
 
 `generated.tf` now contains the full resource blocks — including `properties_json` — fetched from the live API. Review it before proceeding.
 
+#### Example: MSSQL → Snowflake change tracking data flow
+
+After generation, the data flow resource in `generated.tf` looks like this (sensitive values replaced):
+
+```hcl
+# __generated__ by Terraform
+resource "boomi_data_integration_data_flow" "mssql_snowflake_terraform_dataflow" {
+  activate       = true
+  environment_id = var.environment_id
+  group_id       = var.group_id
+  kind           = "main_river"
+  name           = "<YOUR_DATAFLOW_NAME>"
+  type           = "source_to_target"
+
+  properties_json = jsonencode({
+    properties_type = "source_to_target"
+    schemas = [{
+      name = "<YOUR_SOURCE_SCHEMA>"
+      tables = [{
+        details = {
+          additional_source_settings = {
+            extract_method = "change_tracking"
+            source_type    = "mssql"
+          }
+          additional_target_settings = {
+            target_type = "snowflake"
+          }
+          extract_method = "change_tracking"
+          is_selected    = true
+          name           = "<YOUR_TABLE>"
+          target_table   = "<YOUR_TABLE>"
+        }
+        run_type_and_datasource = "multi_tables"
+      }]
+    }]
+    source = {
+      connection_id = boomi_data_integration_connection.mssql.id
+      name          = "mssql"
+      run_type      = "multi_tables"
+    }
+    target = {
+      connection_id  = boomi_data_integration_connection.snowflake_poc_cdc.id
+      database_name  = "<YOUR_SNOWFLAKE_DATABASE>"
+      loading_method = "merge"
+      schema_name    = "<YOUR_SNOWFLAKE_SCHEMA>"
+    }
+  })
+
+  schedule = {
+    cron_expression = "<YOUR_CRON>"
+    is_enabled      = false
+  }
+}
+```
+
+Note how `connection_id` references the imported connection resources by address — not a hardcoded ID. This means Terraform tracks the dependency correctly and the connection cross_ids never appear as literals in your HCL.
+
 ### 4. Apply
 
 ```bash
