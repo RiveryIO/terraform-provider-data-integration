@@ -1,0 +1,21 @@
+templates/guides/use-cases.md
+  s_f74602e8181332::t_ef2faa2468fd38 186
+docs/guides/use-cases.md
+  s_f74602e8181332::t_4000441d7ff6df 186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "64c9952e33682f8aa503162685be09a4fbd68e39",
+  "prompts": {},
+  "sessions": {
+    "s_f74602e8181332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92c60ddd-29ce-4ff0-9cfb-c5fdefd59c4e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
