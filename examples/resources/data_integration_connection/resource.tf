@@ -17,3 +17,41 @@ resource "boomi_data_integration_connection" "example" {
     default_schema_name   = "PUBLIC"
   })
 }
+
+# MSSQL — with SSH tunnel and key file
+resource "boomi_data_integration_connection" "mssql_with_ssh" {
+  name           = "mssql_with_ssh"
+  type           = "mssql"
+  environment_id = var.environment_id
+
+  parameters_json = jsonencode({
+    host            = "<YOUR_MSSQL_HOST>"
+    port            = 1433
+    database        = "<YOUR_DATABASE>"
+    username        = "<YOUR_USERNAME>"
+    password        = "<YOUR_PASSWORD>"
+    is_ssh_tunnel   = true
+    ssh_remote_host = "<YOUR_SSH_TUNNEL_HOST>"
+    ssh_remote_port = 22
+    ssh_remote_user = "<YOUR_SSH_TUNNEL_USER>"
+  })
+
+  file_params = {
+    ssh_pkey_file_path = "<LOCAL_PATH_TO_KEY.pem>"
+  }
+}
+
+# MSSQL — direct connection (no SSH)
+resource "boomi_data_integration_connection" "mssql" {
+  name           = "mssql"
+  type           = "mssql"
+  environment_id = var.environment_id
+
+  parameters_json = jsonencode({
+    host     = "<YOUR_MSSQL_HOST>"
+    port     = 1433
+    database = "<YOUR_DATABASE>"
+    username = "<YOUR_USERNAME>"
+    password = "<YOUR_PASSWORD>"
+  })
+}
