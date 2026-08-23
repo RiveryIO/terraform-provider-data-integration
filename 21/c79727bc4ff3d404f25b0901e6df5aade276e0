@@ -1,0 +1,21 @@
+docs/guides/database-data-flows.md
+  s_5c057b1492ffc4::t_13e9a5c546f6d6 105-133
+examples/mssql-change-tracking/main.tf
+  s_5c057b1492ffc4::t_56ad7a385d98b0 1-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "21c79727bc4ff3d404f25b0901e6df5aade276e0",
+  "prompts": {},
+  "sessions": {
+    "s_5c057b1492ffc4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c26569-2db2-4886-be49-efa546d7c687",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
