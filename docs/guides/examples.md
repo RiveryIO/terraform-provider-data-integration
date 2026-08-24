@@ -229,6 +229,13 @@ See [API connector data flows](./api-connector-data-flows.md).
 [`source-to-target-bigquery`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/source-to-target-bigquery)
 — modeled on a real integration flow (ECB exchange rates → BigQuery).
 
+### Calculated columns (source expressions)
+
+[`calculated-columns`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/calculated-columns)
+— inject columns computed at the source database (ingestion timestamps, server metadata) into every
+extracted row via `modified_columns` with `calculated_column_mode = "source"`. See
+[Schema & column mapping — calculated columns](./metadata-and-schema.md#calculated-columns-source-expressions).
+
 ### Incremental extraction
 
 [`mysql-incremental-to-snowflake`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/mysql-incremental-to-snowflake)
