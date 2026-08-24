@@ -127,10 +127,6 @@ per table, then populate `additional_source_settings` with the MSSQL discriminat
 See [examples/mssql-change-tracking](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/mssql-change-tracking)
 for complete end-to-end examples of both variants.
 
-!> `change_tracking_settings` in the `details` block is a separate, unrelated field used by the
-**system versioning** extract method. For SQL Server change tracking, leave it as `null` and populate
-`additional_source_settings` instead.
-
 ## Column selection: `modified_columns` is a delta
 
 `modified_columns` is **not** the list of columns to replicate — every column
