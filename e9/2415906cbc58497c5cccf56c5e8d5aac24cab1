@@ -1,0 +1,19 @@
+examples/calculated-columns/main.tf
+  s_f74602e8181332::t_ea375f0e7fa067 12-13,15-17,20-23,25-27,33-37,49,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e92415906cbc58497c5cccf56c5e8d5aac24cab1",
+  "prompts": {},
+  "sessions": {
+    "s_f74602e8181332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92c60ddd-29ce-4ff0-9cfb-c5fdefd59c4e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
