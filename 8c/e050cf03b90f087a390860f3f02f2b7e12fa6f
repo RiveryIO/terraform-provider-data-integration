@@ -1,0 +1,21 @@
+internal/provider/data_flow_resource.go
+  s_5c057b1492ffc4::t_3a0427fa56ba5d 811-818,827
+internal/provider/data_flow_resource_test.go
+  s_5c057b1492ffc4::t_c7396f9a851335 484-488
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "8ce050cf03b90f087a390860f3f02f2b7e12fa6f",
+  "prompts": {},
+  "sessions": {
+    "s_5c057b1492ffc4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c26569-2db2-4886-be49-efa546d7c687",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
