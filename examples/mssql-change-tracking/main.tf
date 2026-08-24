@@ -73,18 +73,18 @@ resource "boomi_data_integration_data_flow" "orders_with_deletes" {
       tables = [{
         run_type_and_datasource = "multi_tables"
         details = {
-          name              = "orders"
-          target_table      = "orders"
-          is_selected       = true
-          extract_method    = "change_tracking"
+          name                = "orders"
+          target_table        = "orders"
+          is_selected         = true
+          extract_method      = "change_tracking"
           exporter_chunk_size = 30000
-          modified_columns  = []
+          modified_columns    = []
 
           # ── Key setting ──────────────────────────────────────────────────────
           additional_source_settings = {
             source_type          = "mssql"
-            include_deleted_rows = true  # DELETE operations propagated to target
-            last_sync_version    = 0     # platform updates this after each run
+            include_deleted_rows = true # DELETE operations propagated to target
+            last_sync_version    = 0    # platform updates this after each run
             filter_expression    = ""
           }
           # ─────────────────────────────────────────────────────────────────────
@@ -146,18 +146,18 @@ resource "boomi_data_integration_data_flow" "orders_inserts_updates_only" {
       tables = [{
         run_type_and_datasource = "multi_tables"
         details = {
-          name              = "orders"
-          target_table      = "orders"
-          is_selected       = true
-          extract_method    = "change_tracking"
+          name                = "orders"
+          target_table        = "orders"
+          is_selected         = true
+          extract_method      = "change_tracking"
           exporter_chunk_size = 30000
-          modified_columns  = []
+          modified_columns    = []
 
           # ── Key setting ──────────────────────────────────────────────────────
           additional_source_settings = {
             source_type          = "mssql"
-            include_deleted_rows = false  # deletes ignored; target retains all rows
-            last_sync_version    = 0      # platform updates this after each run
+            include_deleted_rows = false # deletes ignored; target retains all rows
+            last_sync_version    = 0     # platform updates this after each run
             filter_expression    = ""
           }
           # ─────────────────────────────────────────────────────────────────────

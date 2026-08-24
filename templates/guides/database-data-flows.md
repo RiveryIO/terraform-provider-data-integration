@@ -102,6 +102,35 @@ table, and do not duplicate the contract by hand.
 `log` selects change-data-capture, which has its own rules (a mandatory scheduler, an activation
 sequence, and an offset resource): see [CDC data flows](./cdc-data-flows.md).
 
+## Change tracking (MSSQL)
+
+`change_tracking` is a SQL Server–native feature that records which rows changed since a given sync
+version, without requiring SQL Server Agent or log-based CDC. Set `extract_method = "change_tracking"`
+per table, then populate `additional_source_settings` with the MSSQL discriminator.
+
+### `additional_source_settings` for MSSQL change tracking
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `source_type` | `"mssql"` | **Required discriminator.** |
+| `include_deleted_rows` | bool | `true` → deleted rows are propagated to the target and removed there. `false` → only INSERTs and UPDATEs sync; rows deleted in the source remain in the target. |
+| `last_sync_version` | int | The SQL Server change-tracking version to resume from. Set to `0` on first run; the platform updates this value automatically after each successful run. Do not hard-code a real version number — import the resource instead. |
+| `filter_expression` | string | Optional SQL `WHERE` clause applied to the change-tracked query. Leave as `""` to fetch all changed rows. |
+
+### Choosing `include_deleted_rows`
+
+| Value | Use when |
+| --- | --- |
+| `true` | The target table should mirror the source exactly — deletes in the source must be removed from the target on the next run. |
+| `false` | Downstream consumers must retain the full history; deleted rows should remain in the target as a soft-delete tombstone or for audit purposes. |
+
+See [examples/mssql-change-tracking](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/mssql-change-tracking)
+for complete end-to-end examples of both variants.
+
+!> `change_tracking_settings` in the `details` block is a separate, unrelated field used by the
+**system versioning** extract method. For SQL Server change tracking, leave it as `null` and populate
+`additional_source_settings` instead.
+
 ## Column selection: `modified_columns` is a delta
 
 `modified_columns` is **not** the list of columns to replicate — every column
