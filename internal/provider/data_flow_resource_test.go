@@ -481,15 +481,16 @@ func TestDataFlowUpdateActivationTransitions(t *testing.T) {
 			wantStatus: types.StringValue("disabled"),
 		},
 		{
-			// The case this whole fix is about: editing an already-active flow's
-			// content, with activate staying true, must not disable it first —
-			// that was pure defensive overhead the real API never required.
+			// The case this whole fix is about: editing an already-active non-CDC
+			// flow's content, with activate staying true, must neither disable it
+			// first nor re-activate it afterwards — the flow was never deactivated,
+			// so calling activate_river would be a no-op for V2 flows but a hard 400
+			// for V1 (UI-created) and imported flows.
 			name:  "unchanged and active (a content edit) touches no disable endpoint",
 			props: batchProps, planActivate: types.BoolValue(true), stateActivate: true,
 			wantCalls: []string{
 				"GET /v1/accounts/acc/environments/env1/rivers/river1",
 				"PUT /v1/accounts/acc/environments/env1/rivers/river1",
-				"POST /v1/accounts/acc/environments/env1/rivers/river1/activate_river",
 			},
 			wantStatus: types.StringValue("active"),
 		},

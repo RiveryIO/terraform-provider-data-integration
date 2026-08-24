@@ -808,13 +808,14 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	activated := false
-	if wantActive && !wasActive {
-		// Only call activate_river when actually transitioning inactive → active.
-		// Calling it on an already-active flow is a no-op for V2 API-created flows
-		// but a hard 400 for V1 (UI-created) flows and for imported flows that the
-		// activate endpoint does not support. wasActive reflects the last-known state;
-		// if the flow was deactivated out-of-band between plan and apply, the next
-		// refresh will catch it and re-activate on the following apply.
+	if wantActive && (!wasActive || deactivated) {
+		// Call activate_river when:
+		//   - transitioning inactive → active (!wasActive), OR
+		//   - the flow was temporarily disabled by the CDC locked-properties path
+		//     (deactivated=true) and must be restored to active.
+		// Skip it when the flow was already active and was never disabled — calling
+		// activate_river on an already-active flow is a no-op for V2 API-created flows
+		// but a hard 400 for V1 (UI-created) and imported flows.
 		activateTimeout := dataFlowOpTimeout
 		if isCDC {
 			activateTimeout = cdcEnableOpTimeout
@@ -823,7 +824,7 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.Append(activateDiags...)
 		activated = !activateDiags.HasError()
 	} else if wantActive {
-		activated = true // already active; no call needed
+		activated = true // already active and not deactivated; no call needed
 	}
 
 	plan.Activate = types.BoolValue(wantActive)
