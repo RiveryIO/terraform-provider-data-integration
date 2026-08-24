@@ -9,44 +9,32 @@
 # as ingestion timestamps, run watermarks, or any deterministic SQL expression
 # the source database supports — without touching the source schema.
 #
-# This example shows two expression columns alongside a regular mapped column,
-# so the difference is visible in a single config.
+# This example assumes the source and target connections already exist.
+# Pass their IDs via variables (or substitute literal string IDs).
 
-# ── Connections ───────────────────────────────────────────────────────────────
-
-resource "boomi_data_integration_connection" "mssql" {
-  name = "MSSQL Source"
-  type = "mssql"
-
-  parameters_json = jsonencode({
-    host     = "<MSSQL_HOST>"
-    port     = 1433
-    username = "<MSSQL_USERNAME>"
-    password = "<MSSQL_PASSWORD>"
-    database = "<MSSQL_DATABASE>"
-  })
+variable "environment_id" {
+  type        = string
+  description = "An existing environment ID."
 }
 
-resource "boomi_data_integration_connection" "snowflake" {
-  name = "Snowflake Target"
-  type = "snowflake"
+variable "source_connection_id" {
+  type        = string
+  description = "Cross-ID of an existing MSSQL source connection."
+}
 
-  parameters_json = jsonencode({
-    account_name          = "<SNOWFLAKE_ACCOUNT>"
-    username              = "<SNOWFLAKE_USERNAME>"
-    password              = "<SNOWFLAKE_PASSWORD>"
-    default_database_name = "<SNOWFLAKE_DATABASE>"
-    warehouse             = "<SNOWFLAKE_WAREHOUSE>"
-  })
+variable "target_connection_id" {
+  type        = string
+  description = "Cross-ID of an existing Snowflake target connection."
 }
 
 # ── Data flow ─────────────────────────────────────────────────────────────────
 
 resource "boomi_data_integration_data_flow" "orders_with_expression_columns" {
-  name     = "MSSQL → Snowflake with calculated columns"
-  kind     = "main_river"
-  type     = "source_to_target"
-  activate = false
+  environment_id = var.environment_id
+  name           = "MSSQL → Snowflake with calculated columns"
+  kind           = "main_river"
+  type           = "source_to_target"
+  activate       = false
 
   schedule = {
     cron_expression = "0 * * * *"
@@ -58,7 +46,7 @@ resource "boomi_data_integration_data_flow" "orders_with_expression_columns" {
 
     source = {
       name          = "mssql"
-      connection_id = boomi_data_integration_connection.mssql.id
+      connection_id = var.source_connection_id
       run_type      = "multi_tables"
       additional_settings = {
         run_type       = "multi_tables"
@@ -71,7 +59,7 @@ resource "boomi_data_integration_data_flow" "orders_with_expression_columns" {
 
     target = {
       name           = "snowflake"
-      connection_id  = boomi_data_integration_connection.snowflake.id
+      connection_id  = var.target_connection_id
       loading_method = "merge"
       merge_method   = "merge"
       database_name  = "<SNOWFLAKE_DATABASE>"
@@ -175,14 +163,6 @@ resource "boomi_data_integration_data_flow" "orders_with_expression_columns" {
 }
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
-
-output "mssql_connection_id" {
-  value = boomi_data_integration_connection.mssql.id
-}
-
-output "snowflake_connection_id" {
-  value = boomi_data_integration_connection.snowflake.id
-}
 
 output "data_flow_id" {
   value = boomi_data_integration_data_flow.orders_with_expression_columns.id
