@@ -1,0 +1,23 @@
+examples/facebook-ads-to-snowflake/main.tf
+  s_5c057b1492ffc4::t_2eab2ffb9d7edb 1-86
+templates/guides/use-cases.md
+  s_5c057b1492ffc4::t_3fc2a676ef1a19 86-88
+docs/guides/use-cases.md
+  s_5c057b1492ffc4::t_856b45c38e643c 86-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "ce935dbadb6c30f53ac794259454faac6e0beff3",
+  "prompts": {},
+  "sessions": {
+    "s_5c057b1492ffc4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c26569-2db2-4886-be49-efa546d7c687",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
