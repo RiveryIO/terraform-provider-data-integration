@@ -1,0 +1,19 @@
+internal/provider/data_flow_resource.go
+  s_f74602e8181332::t_13152beb72e0f0 811-817,825-826
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e197f5072d52b34be5b903380e5ed253b5c5dc38",
+  "prompts": {},
+  "sessions": {
+    "s_f74602e8181332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92c60ddd-29ce-4ff0-9cfb-c5fdefd59c4e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
