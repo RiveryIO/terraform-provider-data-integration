@@ -808,8 +808,13 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	activated := false
-	if wantActive {
-		// CDC data flows take longer to activate after enabling CDC — use the extended timeout.
+	if wantActive && !wasActive {
+		// Only call activate_river when actually transitioning inactive → active.
+		// Calling it on an already-active flow is a no-op for V2 API-created flows
+		// but a hard 400 for V1 (UI-created) flows and for imported flows that the
+		// activate endpoint does not support. wasActive reflects the last-known state;
+		// if the flow was deactivated out-of-band between plan and apply, the next
+		// refresh will catch it and re-activate on the following apply.
 		activateTimeout := dataFlowOpTimeout
 		if isCDC {
 			activateTimeout = cdcEnableOpTimeout
@@ -817,6 +822,8 @@ func (r *dataFlowResource) Update(ctx context.Context, req resource.UpdateReques
 		activateDiags := r.activateFlow(ctx, envID, plan.ID.ValueString(), activateTimeout)
 		resp.Diagnostics.Append(activateDiags...)
 		activated = !activateDiags.HasError()
+	} else if wantActive {
+		activated = true // already active; no call needed
 	}
 
 	plan.Activate = types.BoolValue(wantActive)
