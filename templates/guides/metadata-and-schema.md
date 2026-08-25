@@ -59,6 +59,46 @@ This same `modified_columns` shape is what you're building (or overriding)
 when you use the discovery data source below — it's the one contract, not
 two.
 
+## Calculated columns (source expressions)
+
+`modified_columns` can include columns that do not exist in the source table.
+Setting `calculated_column_mode = "source"` tells the platform to evaluate
+`expression` as a SQL snippet **at the source database** and land the result in
+the target column under `alias`.
+
+```hcl
+modified_columns = [
+  # Regular column — mark as merge key.
+  { name = "order_id", type = "INTEGER", is_selected = true, is_key = true },
+
+  # Expression column — injected at the source DB; not a real column.
+  {
+    name                   = "ingestion_utc_at"
+    alias                  = "ingestion_utc_at"
+    expression             = "SYSUTCDATETIME()"
+    type                   = "TIMESTAMP"
+    calculated_column_mode = "source"
+    is_selected            = true
+    order                  = 1         # position among expression columns (1-based)
+    target_type            = "snowflake"
+  },
+]
+```
+
+Key points:
+
+- The column does not need to exist in the source table — the platform injects it
+  into every extracted row via the SELECT.
+- `expression` is passed verbatim to the source database. Use the SQL dialect that
+  database supports (`SYSUTCDATETIME()` for MSSQL, `UTC_TIMESTAMP()` for MySQL,
+  `NOW() AT TIME ZONE 'UTC'` for Postgres).
+- Expression columns **cannot be merge keys** — `is_key` must be absent or `false`.
+- `calculated_column_mode = "target"` evaluates the expression at the warehouse
+  instead of the source. The two modes are independent features; `"source"` is the
+  common one for metadata enrichment.
+
+Full runnable example: [`examples/calculated-columns`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/calculated-columns).
+
 ## Discovering an RDBMS source's schema
 
 `boomi_data_integration_source_metadata` introspects a live RDBMS source
