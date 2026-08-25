@@ -23,7 +23,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -104,6 +106,13 @@ type Client struct {
 	accountID   string
 	maxRetries  int
 	backoff     time.Duration
+
+	// propsOnce/propsByType/propsErr memoise the connection-type property
+	// catalog. It costs ~19 paginated requests, so it is fetched at most once
+	// per Client and shared by every connection resource in the run.
+	propsOnce   sync.Once
+	propsByType map[string][]string
+	propsErr    error
 }
 
 // Config configures a Client. BaseURL and AccountID are always required.
@@ -1283,6 +1292,67 @@ func (c *Client) listTypeCatalog(ctx context.Context, endpoint string, unwrapFie
 		}
 	}
 	return all, nil
+}
+
+// ConnectionTypeProperties returns the property ids a connection type accepts,
+// and ok=false when the catalog has no row for that type at all.
+//
+// It reads the catalog LISTING (/v1/connections_types), not the per-type
+// endpoint, because the two disagree and the listing is the superset. Measured
+// live on 2026-08-13: mysql 18 properties from the listing vs 10 from
+// /v1/connections_types/mysql, mssql 22 vs 13, snowflake 23 vs 10, postgres 28
+// vs 12, jira 12 vs 7. In every type diffed, the per-type response was a strict
+// subset — it omits the whole SSH-tunnel field set (is_ssh_tunnel,
+// ssh_remote_user/_port/_password, ssh_pkey_file_path, ssh_pkey_file_pwd,
+// ssh_auto_generate) and the file-zone staging fields (default_bucket, region,
+// aws_access_key/_secret, custom_fz, fz_connection_id), plus connection_name.
+// Validating against the per-type endpoint would therefore reject valid
+// configurations.
+//
+// The catalog carries several rows per connection_type (365 rows, 188 distinct
+// type ids), so the ids are unioned across every row matching the type.
+func (c *Client) ConnectionTypeProperties(ctx context.Context, connectionType string) ([]string, bool, error) {
+	c.propsOnce.Do(func() {
+		rows, err := c.ListConnectionTypes(ctx)
+		if err != nil {
+			c.propsErr = err
+			return
+		}
+		byType := make(map[string]map[string]bool, len(rows))
+		for _, row := range rows {
+			ct, _ := row["connection_type"].(string)
+			if ct == "" {
+				continue
+			}
+			if byType[ct] == nil {
+				byType[ct] = map[string]bool{}
+			}
+			props, _ := row["properties"].([]any)
+			for _, p := range props {
+				pm, isMap := p.(map[string]any)
+				if !isMap {
+					continue
+				}
+				if id, _ := pm["id"].(string); id != "" {
+					byType[ct][id] = true
+				}
+			}
+		}
+		c.propsByType = make(map[string][]string, len(byType))
+		for ct, set := range byType {
+			ids := make([]string, 0, len(set))
+			for id := range set {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			c.propsByType[ct] = ids
+		}
+	})
+	if c.propsErr != nil {
+		return nil, false, c.propsErr
+	}
+	ids, ok := c.propsByType[connectionType]
+	return ids, ok, nil
 }
 
 // GetConnectionType returns one connection type's property schema —

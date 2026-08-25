@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/boomi/terraform-provider-data-integration/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
@@ -22,10 +24,45 @@ var (
 	_ resource.Resource                = (*connectionResource)(nil)
 	_ resource.ResourceWithConfigure   = (*connectionResource)(nil)
 	_ resource.ResourceWithImportState = (*connectionResource)(nil)
+	_ resource.ResourceWithModifyPlan  = (*connectionResource)(nil)
 )
 
-// secretAPIFields are field names that contain actual secret values returned by
-// the API. Strip these from connection_info so state never holds credentials.
+// secretAPIFields are field names that would contain actual secret values if the
+// API ever returned them. Stripped from connection_info so state never holds
+// credentials.
+//
+// DEFENCE IN DEPTH, NOT THE PRIMARY PROTECTION — measured live against the
+// integration environment on 2026-08-13, so nobody has to re-derive it:
+//
+//   - A connection GET never returns a secret VALUE. It reports presence
+//     instead, as booleans with an `_exists` suffix (password_exists,
+//     api_token_exists, client_secret_exists, credentials_exists,
+//     ssh_remote_password_exists, ssh_pkey_file_pwd_exists) alongside
+//     is_<field>_encrypted flags.
+//   - Established by creating a throwaway mysql connection carrying sentinel
+//     values in two fields: `password` (listed below) and `ssh_remote_password`
+//     (deliberately NOT listed below). Neither sentinel appeared anywhere in
+//     the create or the read body — only password_exists /
+//     is_password_encrypted and ssh_remote_password_exists /
+//     is_ssh_remote_password_encrypted. Corroborated by reading two
+//     pre-existing connections of different types, which show the same shape.
+//     Non-secret fields (host, port, database, username) DO come back in clear.
+//   - So the names below do not occur as keys on the read path at all. What
+//     does occur are the `_exists` booleans, which are safe to keep. This map
+//     is a guard against a response shape the API does not currently produce —
+//     and note the sentinel test shows an unlisted secret field is equally
+//     safe, which is why the drift below has no impact.
+//   - The list is also incomplete by design-drift, which is harmless for the
+//     reason above but worth knowing before anyone "fixes" it: the catalog
+//     listing marks 50 distinct property ids as "type":"password" across its 365
+//     rows (188 distinct connection_type ids — the catalog carries several rows
+//     per type), and the 13 names below cover 10 of them. Deriving the set from
+//     the catalog is possible (the "type":"password" marker is reliable; ui_type
+//     is NOT — the per-type endpoint omits it) but buys nothing while secrets
+//     are never echoed.
+//
+// Re-check with: GET /v1/accounts/{acct}/environments/{env}/connections/{id}
+// and confirm every credential-bearing field still arrives as <field>_exists.
 var secretAPIFields = map[string]bool{
 	"password": true, "account_key": true, "access_token": true,
 	"personal_access_token": true, "aws_access_secret": true,
@@ -97,7 +134,16 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				CustomType: jsontypes.NormalizedType{},
 				Description: "Connection-type-specific parameters as a JSON object, including " +
 					"credentials. Write-only: never stored in state. The API omits secrets on " +
-					"read, so drift detection for credentials is not possible.",
+					"read, so drift detection for credentials is not possible. Must be a FLAT " +
+					"object: every key becomes a top-level field of the connection request body, " +
+					"alongside name and type. Nested objects are passed through as-is and are not " +
+					"unwrapped — the API then ignores the whole wrapper and creates a connection " +
+					"with no host and no credentials, without reporting an error. Keys must be the " +
+					"connection type's property ids; name, type and ssh_pkey_file_path are reserved " +
+					"and dropped here, and a key already set by a file_params upload wins over the " +
+					"same key set here. Keys the type does not declare raise a plan-time warning — " +
+					"checked against the catalog listing (/v1/connections_types), which is a strict " +
+					"superset of the per-type endpoint.",
 			},
 			"fz_connection_id": schema.StringAttribute{
 				Optional:    true,
@@ -176,6 +222,94 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 		},
 	}
+}
+
+// ModifyPlan checks the keys in parameters_json against the connection type's
+// real property list, read from the live catalog, and warns about any the API
+// will not recognise.
+//
+// This is the only place a misspelled credential field can be caught. The API
+// accepts unknown keys silently — a misspelled password applies cleanly, returns
+// 201, and yields a connection with no credential — and a read cannot tell the
+// difference afterwards, because secrets are never returned (see
+// secretAPIFields). Both measured live on 2026-08-13.
+//
+// A WARNING, deliberately not an error. The catalog has already been observed to
+// disagree with itself across endpoints, so a hard failure risks rejecting a
+// working configuration over a catalog gap. If the lookup itself fails the plan
+// proceeds unchecked: this is a safety net, never a gate.
+func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Destroy plans carry a null config; nothing to check.
+	if req.Config.Raw.IsNull() || r.data == nil || r.data.client == nil {
+		return
+	}
+
+	var cfg connectionModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if cfg.Type.IsNull() || cfg.Type.IsUnknown() ||
+		cfg.ParametersJSON.IsNull() || cfg.ParametersJSON.IsUnknown() {
+		return
+	}
+
+	var params map[string]any
+	if err := json.Unmarshal([]byte(cfg.ParametersJSON.ValueString()), &params); err != nil {
+		return // Create/Update reports malformed JSON with a proper diagnostic.
+	}
+
+	connType := cfg.Type.ValueString()
+	valid, known, err := r.data.client.ConnectionTypeProperties(ctx, connType)
+	if err != nil || !known {
+		return // catalog unreachable, or an unlisted type: check nothing.
+	}
+	allowed := make(map[string]bool, len(valid))
+	for _, id := range valid {
+		allowed[id] = true
+	}
+
+	var unknown, nested []string
+	for k, v := range params {
+		if allowed[k] || k == "name" || k == "type" || k == "ssh_pkey_file_path" {
+			continue
+		}
+		if _, isObj := v.(map[string]any); isObj {
+			nested = append(nested, k)
+		}
+		unknown = append(unknown, k)
+	}
+	if len(unknown) == 0 {
+		return
+	}
+	sort.Strings(unknown)
+	sort.Strings(nested)
+
+	detail := fmt.Sprintf(
+		"The API drops keys it does not recognise without reporting an error, so these "+
+			"would apply cleanly and leave the connection without the values they carry:\n\n"+
+			"  %s\n\nValid keys for connection type %q are:\n\n  %s",
+		strings.Join(unknown, ", "), connType, strings.Join(valid, ", "))
+	if len(nested) > 0 {
+		detail += fmt.Sprintf(
+			"\n\nNote that %s %s a nested object. parameters_json must be FLAT — every key "+
+				"becomes a top-level field of the request body. A wrapper object is forwarded as "+
+				"one unrecognised key and discarded whole.",
+			strings.Join(nested, ", "), plural(len(nested), "is", "are"))
+	}
+	detail += "\n\nRead the type's real property list with the " +
+		"boomi_data_integration_connection_type data source. This is a warning, not an error: " +
+		"the catalog may lag a genuinely new field."
+
+	resp.Diagnostics.AddAttributeWarning(path.Root("parameters_json"),
+		"Unrecognised parameters_json keys", detail)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func (r *connectionResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {

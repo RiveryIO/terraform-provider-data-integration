@@ -12,6 +12,7 @@ output "snowflake_field_ids" {
 }
 
 # The full raw property schema (types, required flags, file-upload fields).
+# Formerly `properties_json`, which still works but is deprecated.
 output "snowflake_schema_json" {
-  value = data.boomi_data_integration_connection_type.snowflake.properties_json
+  value = data.boomi_data_integration_connection_type.snowflake.property_schema_json
 }

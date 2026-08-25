@@ -16,5 +16,5 @@ output "mysql_field_ids" {
 }
 
 output "mysql_schema_json" {
-  value = data.boomi_data_integration_connection_type.mysql.properties_json
+  value = data.boomi_data_integration_connection_type.mysql.property_schema_json
 }

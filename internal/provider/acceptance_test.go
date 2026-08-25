@@ -301,6 +301,44 @@ func TestAccBlueprintResource(t *testing.T) {
 	})
 }
 
+// TestAccConnectionTypeDataSource reads a real connection type's property
+// schema from the live API and asserts the deprecated properties_json alias
+// still carries the identical value as property_schema_json. The unit tests
+// cover the same contract against a mock server; this one proves the live API
+// response actually populates both.
+func TestAccConnectionTypeDataSource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+provider "boomi" {}
+
+data "boomi_data_integration_connection_type" "test" {
+  connection_type = "mysql"
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(
+						"data.boomi_data_integration_connection_type.test", "connection_type", "mysql"),
+					resource.TestCheckResourceAttrSet(
+						"data.boomi_data_integration_connection_type.test", "connection_type_name"),
+					resource.TestCheckResourceAttrSet(
+						"data.boomi_data_integration_connection_type.test", "property_schema_json"),
+					// The backwards-compatibility promise: same value, both names.
+					resource.TestCheckResourceAttrPair(
+						"data.boomi_data_integration_connection_type.test", "property_schema_json",
+						"data.boomi_data_integration_connection_type.test", "properties_json"),
+					// A real mysql type exposes host among its properties.
+					resource.TestCheckTypeSetElemAttr(
+						"data.boomi_data_integration_connection_type.test", "property_names.*", "host"),
+				),
+			},
+		},
+	})
+}
+
 func testAccBlueprintConfig(name, desc string) string {
 	return fmt.Sprintf(`
 provider "boomi" {}
