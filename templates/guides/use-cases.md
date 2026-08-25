@@ -83,8 +83,9 @@ source = {
 target = { name = "bigquery", connection_id = boomi_data_integration_connection.wh.id, loading_method = "merge", merge_method = "insert_on_conflict" }
 ```
 
-Full runnable config: [`examples/source-to-target-bigquery`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/source-to-target-bigquery)
-(also documents the BigQuery keyfile-upload requirement).
+Full runnable configs:
+- [`examples/facebook-ads-to-snowflake`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/facebook-ads-to-snowflake) — Facebook Ads ad-account report → Snowflake with merge loading. Includes an `import` block for the OAuth connection (which must be authorised in the UI first).
+- [`examples/source-to-target-bigquery`](https://github.com/RiveryIO/terraform-provider-data-integration/tree/main/examples/source-to-target-bigquery) — Google Ads → BigQuery (also documents the BigQuery keyfile-upload requirement).
 
 **Read next:** [API connector data flows](./api-connector-data-flows.md), [API connector required
 settings](./api-connectors.md), [Loading methods](./loading-methods.md).
