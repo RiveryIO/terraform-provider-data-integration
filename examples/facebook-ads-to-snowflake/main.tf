@@ -18,20 +18,6 @@ resource "boomi_data_integration_connection" "facebook_ads" {
   type = "fb"
 }
 
-resource "boomi_data_integration_connection" "snowflake" {
-  name = "Snowflake Target"
-  type = "snowflake"
-
-  parameters_json = jsonencode({
-    account_name          = "xy12345.us-east-1"
-    username              = "SVC_USER"
-    password              = "..."
-    default_database_name = "ANALYTICS"
-    warehouse             = "COMPUTE_WH"
-    default_schema_name   = "PUBLIC"
-  })
-}
-
 # ── Data flow ─────────────────────────────────────────────────────────────────
 
 resource "boomi_data_integration_data_flow" "facebook_ads_to_snowflake" {
