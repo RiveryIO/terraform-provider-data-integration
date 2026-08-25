@@ -1,0 +1,21 @@
+templates/guides/metadata-and-schema.md
+  s_5c057b1492ffc4::t_af008be8bfa8e0 62-101
+templates/guides/examples.md.tmpl
+  s_5c057b1492ffc4::t_c58a8231b7e979 59-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "7d5a86c889a478b2798a1036229b0ee208e0f218",
+  "prompts": {},
+  "sessions": {
+    "s_5c057b1492ffc4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c26569-2db2-4886-be49-efa546d7c687",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Omer <omerbo987@gmail.com>"
+    }
+  }
+}
