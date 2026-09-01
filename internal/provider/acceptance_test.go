@@ -51,6 +51,43 @@ func TestAccEnvironmentResource(t *testing.T) {
 	})
 }
 
+// TestAccDataFlowGroupResource exercises create → import → update against a
+// live account. is_default is deliberately never set true here — it flips
+// off whichever group currently holds it (the environment's shared "Global"
+// group in this account) and the API refuses to delete a group while it is
+// still the default, which would leave this test unable to clean up after itself.
+func TestAccDataFlowGroupResource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDataFlowGroupConfig("tf-acc-group", "#3399ff", "folder"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("boomi_data_integration_data_flow_group.test", "id"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "name", "tf-acc-group"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "color", "#3399ff"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "icon", "folder"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "is_default", "false"),
+				),
+			},
+			{
+				ResourceName:      "boomi_data_integration_data_flow_group.test",
+				ImportState:       true,
+				ImportStateVerify: true, // imported state must plan clean
+			},
+			{
+				Config: testAccDataFlowGroupConfig("tf-acc-group-renamed", "#ff9933", "star"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "name", "tf-acc-group-renamed"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "color", "#ff9933"),
+					resource.TestCheckResourceAttr("boomi_data_integration_data_flow_group.test", "icon", "star"),
+				),
+			},
+		},
+	})
+}
+
 // TestAccDataFlowResource exercises create → import → update for a logic data
 // flow, the resource where read shape ≠ write shape — the import-verify step is
 // the load-bearing check that normalization keeps plans clean.
@@ -226,6 +263,18 @@ resource "boomi_data_integration_environment" "test" {
   description = %q
 }
 `, name, desc)
+}
+
+func testAccDataFlowGroupConfig(name, color, icon string) string {
+	return fmt.Sprintf(`
+provider "boomi" {}
+
+resource "boomi_data_integration_data_flow_group" "test" {
+  name  = %q
+  color = %q
+  icon  = %q
+}
+`, name, color, icon)
 }
 
 func testAccDataFlowConfig(name, desc, subFlowID string) string {

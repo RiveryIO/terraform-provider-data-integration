@@ -9,9 +9,9 @@ description: |-
 
 -> **This provider does not manage users or permission groups.** There is no
 `boomi_data_integration_user` or access-control-group resource today. The
-only "group" concept here is `boomi_data_integration_data_flow_group` — a
-read-only lookup for the organizational folder a data flow lives in within an
-environment. It has nothing to do with who can access what.
+only "group" concept here is `boomi_data_integration_data_flow_group` — the
+organizational folder a data flow lives in within an environment. It has
+nothing to do with who can access what.
 
 ## Environments
 
@@ -102,24 +102,26 @@ Order in the `variable` block list is preserved as returned by the API.
 
 ## Data flow groups (organizational folders, not permissions)
 
-`boomi_data_integration_data_flow_group` looks up an existing group by name
-and returns its `id`, for use as `group_id` on a `boomi_data_integration_data_flow`
-resource — this is how you file a data flow into a folder in the console's
-UI, purely organizational:
+`boomi_data_integration_data_flow_group` manages a group (folder) — create,
+rename, recolor, or delete it — and `data.boomi_data_integration_data_flow_group`
+looks one up by name when you just need the `id` of a group someone else
+created (e.g. the environment's default "Global" group). Either way, pass the
+`id` as `group_id` on a `boomi_data_integration_data_flow` resource to file a
+data flow into that folder:
 
 ```hcl
-data "boomi_data_integration_data_flow_group" "etl" {
+resource "boomi_data_integration_data_flow_group" "etl" {
   environment_id = boomi_data_integration_environment.staging.id
   name           = "ETL Pipelines"
 }
 
 resource "boomi_data_integration_data_flow" "jira_issues" {
   environment_id = boomi_data_integration_environment.staging.id
-  group_id       = data.boomi_data_integration_data_flow_group.etl.id
+  group_id       = boomi_data_integration_data_flow_group.etl.id
   # ...
 }
 ```
 
-There is no resource to *create* a group through this provider — group
-creation is UI-only; this data source only looks up groups that already
-exist.
+Only one group per environment can be `is_default = true` — marking a group
+default implicitly un-defaults whichever group held it before, and the API
+refuses to delete or un-default the current default group directly.

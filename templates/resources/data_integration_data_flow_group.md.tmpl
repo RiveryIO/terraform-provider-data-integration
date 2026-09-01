@@ -1,0 +1,24 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: "Environments & variables"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/data_integration_data_flow_group/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Related
+
+- [`boomi_data_integration_data_flow_group`](../data-sources/data_integration_data_flow_group)
+  — look up a group by name instead of managing it, e.g. an environment's default "Global" group.
+- [Environments & variables](../guides/environments-and-variables#data-flow-groups-organizational-folders-not-permissions)
+  — the full picture, including the explicit callout that this provider doesn't manage users or
+  permission groups.

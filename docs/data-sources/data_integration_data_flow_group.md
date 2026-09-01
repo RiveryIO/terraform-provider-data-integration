@@ -2,7 +2,7 @@
 page_title: "Look up a data flow group (boomi_data_integration_data_flow_group)"
 subcategory: "Environments & variables"
 description: |-
-  Looks up an existing data flow group (folder) by name. Groups must be created in the Data Integration UI — the v1 API exposes read-only access. Use this data source to obtain a group's cross_id and pass it as group_id to data flow resources.
+  Looks up an existing data flow group (folder) by name — a group created in the console UI, or one managed elsewhere by boomi_data_integration_data_flow_group. Use this data source to obtain a group's cross_id and pass it as group_id to data flow resources.
 ---
 
 # Look up a data flow group
@@ -12,9 +12,11 @@ place a data flow into the same organizational folder the console uses, from Ter
 
 ## How it works
 
-Groups are organizational only — they have nothing to do with permissions or access control. They
-must be created in the Data Integration console first; the API this provider calls only exposes
-read access, so `boomi_data_integration_data_flow_group` can look one up but this provider cannot create one.
+Groups are organizational only — they have nothing to do with permissions or access control. Use
+`boomi_data_integration_data_flow_group` to look up a group someone else created (in the console, or via
+[`boomi_data_integration_data_flow_group`](../resources/data_integration_data_flow_group) in
+another config) without taking it over as a managed resource — the environment's default "Global"
+group is the common case.
 
 Pass the `id` this returns as `group_id` on a
 [`boomi_data_integration_data_flow`](../resources/data_integration_data_flow) resource.
