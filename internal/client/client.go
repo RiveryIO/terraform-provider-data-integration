@@ -1213,9 +1213,8 @@ type DataFlowGroup struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// ListDataFlowGroups returns every data flow group in the environment. The v1
-// API exposes GET only for groups; creation/mutation is UI-only
-// (allow_from_api=false on the internal route). This method pages until exhausted.
+// ListDataFlowGroups returns every data flow group in the environment. This
+// method pages until exhausted.
 func (c *Client) ListDataFlowGroups(ctx context.Context, environmentID string) ([]DataFlowGroup, error) {
 	var all []DataFlowGroup
 	for page := 1; ; page++ {
@@ -1228,27 +1227,86 @@ func (c *Client) ListDataFlowGroups(ctx context.Context, environmentID string) (
 			return nil, err
 		}
 		for _, it := range resp.Items {
-			str := func(v any) string {
-				s, _ := v.(string)
-				return s
-			}
-			id := str(it["cross_id"])
-			if id == "" {
-				id = str(it["id"])
-			}
-			all = append(all, DataFlowGroup{
-				ID:        id,
-				Name:      str(it["name"]),
-				Color:     str(it["color"]),
-				Icon:      str(it["icon"]),
-				IsDefault: it["is_default"] == true,
-			})
+			all = append(all, dataFlowGroupFromAPI(it))
 		}
 		if len(resp.Items) == 0 || (resp.TotalItems > 0 && len(all) >= resp.TotalItems) {
 			break
 		}
 	}
 	return all, nil
+}
+
+func dataFlowGroupFromAPI(it map[string]any) DataFlowGroup {
+	str := func(v any) string {
+		s, _ := v.(string)
+		return s
+	}
+	id := str(it["cross_id"])
+	if id == "" {
+		id = str(it["id"])
+	}
+	return DataFlowGroup{
+		ID:        id,
+		Name:      str(it["name"]),
+		Color:     str(it["color"]),
+		Icon:      str(it["icon"]),
+		IsDefault: it["is_default"] == true,
+	}
+}
+
+// GetDataFlowGroup finds a single data flow group by cross_id. The v1 API has
+// no GET/{id} route for river groups — only list — so this pages through
+// ListDataFlowGroups looking for a match. Returns ErrNotFound if absent.
+func (c *Client) GetDataFlowGroup(ctx context.Context, environmentID, crossID string) (DataFlowGroup, error) {
+	groups, err := c.ListDataFlowGroups(ctx, environmentID)
+	if err != nil {
+		return DataFlowGroup{}, err
+	}
+	for _, g := range groups {
+		if g.ID == crossID {
+			return g, nil
+		}
+	}
+	return DataFlowGroup{}, ErrNotFound
+}
+
+// CreateDataFlowGroup creates a new river group. PUT (not POST) is the API's
+// create verb here — see api-service api/api_v1/endpoints/river_groups.py.
+// Requires name + color; icon and is_default are optional server-side, but
+// the resource always supplies a value (via schema defaults) so a later
+// UpdateDataFlowGroup — whose PATCH body requires all three unconditionally —
+// never has to guess at a missing icon.
+func (c *Client) CreateDataFlowGroup(ctx context.Context, environmentID string, body map[string]any) (DataFlowGroup, error) {
+	var out map[string]any
+	u := c.envPath(environmentID, "/river_groups")
+	if err := c.request(ctx, http.MethodPut, u, body, &out); err != nil {
+		return DataFlowGroup{}, err
+	}
+	return dataFlowGroupFromAPI(out), nil
+}
+
+// UpdateDataFlowGroup patches an existing river group. name, color, and icon
+// must all be present in body on every call — the API's PatchInput schema has
+// no optional/partial fields for those three. is_default may be omitted to
+// leave it unchanged; explicitly setting is_default=false on the group that
+// is currently the environment's default is rejected by the API (make a
+// different group the default instead, which implicitly unsets this one).
+func (c *Client) UpdateDataFlowGroup(ctx context.Context, environmentID, crossID string, body map[string]any) (DataFlowGroup, error) {
+	var out map[string]any
+	u := c.envPath(environmentID, "/river_groups?group_id="+url.QueryEscape(crossID))
+	if err := c.request(ctx, http.MethodPatch, u, body, &out); err != nil {
+		return DataFlowGroup{}, err
+	}
+	return dataFlowGroupFromAPI(out), nil
+}
+
+// DeleteDataFlowGroup deletes a river group by cross_id. The environment's
+// default group cannot be deleted — the API rejects it with a 400 — and any
+// rivers still filed in the deleted group are moved server-side to the
+// default group.
+func (c *Client) DeleteDataFlowGroup(ctx context.Context, environmentID, crossID string) error {
+	u := c.envPath(environmentID, "/river_groups?group_id="+url.QueryEscape(crossID))
+	return c.request(ctx, http.MethodDelete, u, nil, nil)
 }
 
 // ListTargetTypes returns the target type catalog (/v1/target_types) — each row

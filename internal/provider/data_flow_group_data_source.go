@@ -34,9 +34,10 @@ func (d *dataFlowGroupDataSource) Metadata(_ context.Context, req datasource.Met
 
 func (d *dataFlowGroupDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Looks up an existing data flow group (folder) by name. " +
-			"Groups must be created in the Data Integration UI — the v1 API exposes read-only access. " +
-			"Use this data source to obtain a group's cross_id and pass it as group_id to data flow resources.",
+		Description: "Looks up an existing data flow group (folder) by name — a group created in " +
+			"the console UI, or one managed elsewhere by " +
+			"boomi_data_integration_data_flow_group. Use this data source to obtain a group's " +
+			"cross_id and pass it as group_id to data flow resources.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -120,6 +121,7 @@ func (d *dataFlowGroupDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	resp.Diagnostics.AddError(
 		"Data flow group not found",
-		fmt.Sprintf("No group named %q exists in environment %s. Create it in the Data Integration UI first.", want, envID),
+		fmt.Sprintf("No group named %q exists in environment %s. Create it in the console UI, "+
+			"or manage it with a boomi_data_integration_data_flow_group resource.", want, envID),
 	)
 }
