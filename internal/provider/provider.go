@@ -214,6 +214,7 @@ func (p *dataIntegrationProvider) Configure(ctx context.Context, req provider.Co
 		Token:       token,
 		TokenSource: tokenSource,
 		AccountID:   accountID,
+		Version:     p.version,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to create Data Integration API client", err.Error())
