@@ -34,7 +34,15 @@ const (
 	defaultMaxRetries = 8
 	defaultBackoff    = time.Second
 	rateLimitBackoff  = 10 * time.Second // fixed pause on 429 before retrying
-	userAgent         = "terraform-provider-data-integration/0.1.0"
+
+	// userAgentProduct identifies this client to the API regardless of build
+	// version — combined with the actual version (Config.Version) to form the
+	// User-Agent / X-Boomi-Plugin header value.
+	userAgentProduct = "terraform-provider-data-integration"
+	// defaultVersion is used when Config.Version is empty, matching main.go's
+	// own "dev" fallback so an unversioned build reports the same placeholder
+	// everywhere.
+	defaultVersion = "dev"
 )
 
 // writeForbiddenFields are stripped before every write — the API rejects them
@@ -106,6 +114,10 @@ type Client struct {
 	accountID   string
 	maxRetries  int
 	backoff     time.Duration
+	// userAgent is the full "<product>/<version>" string sent on every
+	// request, built once in New() from Config.Version — see the comment on
+	// userAgentProduct.
+	userAgent string
 
 	// propsOnce/propsByType/propsErr memoise the connection-type property
 	// catalog. It costs ~19 paginated requests, so it is fetched at most once
@@ -128,6 +140,11 @@ type Config struct {
 	HTTPClient  *http.Client
 	MaxRetries  int
 	Backoff     time.Duration
+	// Version identifies the calling provider build (e.g. "2.5.0" from a
+	// GoReleaser tag build, or "test" from an acceptance-test provider
+	// instance) in the User-Agent / X-Boomi-Plugin headers. Falls back to
+	// defaultVersion when empty.
+	Version string
 }
 
 // New builds a Client from Config, applying defaults and validating that the
@@ -165,6 +182,11 @@ func New(cfg Config) (*Client, error) {
 		tokenSource = newStaticTokenSource(cfg.Token)
 	}
 
+	version := cfg.Version
+	if version == "" {
+		version = defaultVersion
+	}
+
 	return &Client{
 		httpClient:  hc,
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
@@ -172,6 +194,7 @@ func New(cfg Config) (*Client, error) {
 		accountID:   cfg.AccountID,
 		maxRetries:  retries,
 		backoff:     backoff,
+		userAgent:   fmt.Sprintf("%s/%s", userAgentProduct, version),
 	}, nil
 }
 
@@ -200,9 +223,9 @@ func (c *Client) headers(ctx context.Context) (http.Header, string, error) {
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
-	h.Set("User-Agent", userAgent)
+	h.Set("User-Agent", c.userAgent)
 	// Attribution header — feeds the NR usage dashboard (BDI pattern).
-	h.Set("X-Boomi-Plugin", fmt.Sprintf("%s (account=%s)", userAgent, c.accountID))
+	h.Set("X-Boomi-Plugin", fmt.Sprintf("%s (account=%s)", c.userAgent, c.accountID))
 	return h, token, nil
 }
 

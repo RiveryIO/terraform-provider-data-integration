@@ -64,6 +64,55 @@ func TestScopedPaths_And_AuthHeader(t *testing.T) {
 	}
 }
 
+func TestUserAgent_ReflectsVersion(t *testing.T) {
+	var gotUA, gotPlugin string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		gotPlugin = r.Header.Get("X-Boomi-Plugin")
+		_, _ = w.Write([]byte(`{"_id":"e1","name":"prod"}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{
+		BaseURL:   srv.URL,
+		Token:     "tok",
+		AccountID: "acct1",
+		Version:   "9.9.9",
+		Backoff:   time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.GetEnvironment(context.Background(), "e1"); err != nil {
+		t.Fatalf("GetEnvironment: %v", err)
+	}
+	const want = "terraform-provider-data-integration/9.9.9"
+	if gotUA != want {
+		t.Errorf("User-Agent = %q, want %q", gotUA, want)
+	}
+	if !contains(gotPlugin, want) {
+		t.Errorf("X-Boomi-Plugin = %q, want it to contain %q", gotPlugin, want)
+	}
+}
+
+func TestUserAgent_DefaultsWhenVersionEmpty(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte(`{"_id":"e1","name":"prod"}`))
+	}))
+	defer srv.Close()
+
+	c := testClient(t, srv) // Config.Version left empty
+	if _, err := c.GetEnvironment(context.Background(), "e1"); err != nil {
+		t.Fatalf("GetEnvironment: %v", err)
+	}
+	const want = "terraform-provider-data-integration/dev"
+	if gotUA != want {
+		t.Errorf("User-Agent = %q, want %q", gotUA, want)
+	}
+}
+
 func TestEnvScopedPath(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
